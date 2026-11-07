@@ -2,7 +2,7 @@
 
 An offline reading planner for Android. Pick a PDF or a paper book, set a pace or a finish date, and Volapace turns it into a few pages a day. You read in the built-in reader, finish today's pages and keep a streak.
 
-Volapace has no account and no sync, and it doesn't ask for internet access. Your books, progress, highlights and history stay on your phone.
+Volapace has no account and no sync. Your books, progress, highlights and history stay on your phone. The only time it goes online is when you tap **Check for updates**, which asks GitHub for the latest release.
 
 ## Install
 
@@ -25,7 +25,7 @@ The app starts empty and fills up as you use it.
 
 ### The Volapace folder
 
-Books live in `Android/data/app.volapace/files/Volapace` on your phone. Any PDF you put there, for example over USB from a computer, appears in the library automatically. Volapace never parses the whole folder at once:
+Books live in a **Volapace** folder in your phone's main storage once you allow storage access (Profile → Books folder → Use a Volapace folder). Until then they stay in `Android/data/app.volapace/files/Volapace`. Any PDF you put there, for example over USB from a computer, appears in the library automatically. Volapace never parses the whole folder at once:
 
 - Each file gets a content-hash id, so progress survives renames and duplicate copies count as one book.
 - Only new or changed files are read. Page counts come from Android's built-in PDF renderer.
@@ -55,7 +55,7 @@ web/                      The UI: React screens from the design, built into app/
 CLAUDE.md                 Product requirements from the design handoff
 ```
 
-The UI is the original design, ported from its HTML prototype. It runs inside a WebView with everything bundled. The app serves its own files through `shouldInterceptRequest`, and without the internet permission nothing can reach the network.
+The UI is the original design, ported from its HTML prototype. It runs inside a WebView with everything bundled. The app serves its own files through `shouldInterceptRequest`, and the WebView can't load anything from the network.
 
 ## Build
 

@@ -125,13 +125,6 @@ function TodayPlan({ go, hostRef, ctx = {}, update, account, lib, openBook }) {
 
       {doneSet(ctx).size > 0 && <div onClick={() => go('streak')} style={{ cursor: 'pointer' }}><StreakWeek ctx={ctx} style={{ marginBottom: 12 }} /></div>}
 
-      {!done && !open && (
-        <button onClick={() => setOpen(true)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 'var(--card-radius)', border: '1px solid var(--line)', background: 'var(--surface)', cursor: 'pointer', textAlign: 'left', marginBottom: 12 }}>
-          <Icon name="pages" size={20} style={{ color: 'var(--ink-2)' }} />
-          <span style={{ flex: 1, fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15, color: 'var(--ink)' }}>Reading a paper copy? Log pages</span>
-          <Icon name="chevronRight" size={18} style={{ color: 'var(--ink-3)' }} />
-        </button>
-      )}
       {open && (
         <div style={{ borderRadius: 'var(--card-radius)', border: '1px solid var(--line)', background: 'var(--surface)', padding: 18, marginBottom: 12, animation: 'fadeUp .25s cubic-bezier(.2,.8,.2,1)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>

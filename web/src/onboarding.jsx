@@ -172,7 +172,7 @@ function RemindersScreen({ ctx, update, go, back, onboarding }) {
   const rest = restDaysOf(ctx);
   return (
     <div style={{ minHeight: '100%', padding: 'calc(var(--sat) + 16px) 22px calc(var(--sab) + 36px)', boxSizing: 'border-box' }}>
-      <ScreenTop back={back} step={onboarding ? 'Step 3 of 4' : null} title={onboarding ? 'Stay on track' : 'Reminders'} sub="Gentle nudges, at times that suit you."
+      <ScreenTop back={back} step={onboarding ? 'Step 3 of 4' : null} title={onboarding ? 'Stay on track' : 'Reminders'} sub={onboarding ? 'A daily nudge and your days off. More reminder options are in Profile.' : 'Gentle nudges, at times that suit you.'}
         right={onboarding ? <button onClick={() => go('summary')} style={{ background: 'none', border: 'none', color: 'var(--ink-2)', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15, cursor: 'pointer', padding: 8 }}>Skip</button> : null} />
 
       <Group title="Daily reminder">
@@ -182,6 +182,7 @@ function RemindersScreen({ ctx, update, go, back, onboarding }) {
         <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)', padding: '0 16px 14px', marginTop: n.on ? -4 : 0 }}>Skipped automatically on days you've already read.</div>
       </Group>
 
+      {!onboarding && <>
       <Group title="Streak rescue">
         <Row icon="flame" title="Save my streak" sub={n.rescue ? `Extra nudge at ${fmt12(n.rescueTime)} if I haven't read yet` : 'Off'} control={<Toggle on={n.rescue} onChange={v => set('rescue', v)} />} last={!n.rescue} />
         {n.rescue && <div style={{ padding: '0 16px 14px' }}><TimeField value={n.rescueTime} onChange={v => set('rescueTime', v)} /></div>}
@@ -207,6 +208,7 @@ function RemindersScreen({ ctx, update, go, back, onboarding }) {
           </div>
         )}
       </Group>
+      </>}
 
       {(hasPlan || onboarding) && (
         <Group title="Rest days">
@@ -239,8 +241,8 @@ function SummaryScreen({ ctx, update, go, back }) {
       <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12, color: 'var(--ink-2)', marginTop: 3 }}>{l}</div>
     </div>
   );
-  const line = (icon, t, v) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+  const line = (icon, t, v, last) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: last ? 'none' : '1px solid var(--line)' }}>
       <Icon name={icon} size={18} style={{ color: 'var(--ink-2)' }} />
       <span style={{ flex: 1, fontFamily: 'var(--font-ui)', fontSize: 14.5, color: 'var(--ink-2)' }}>{t}</span>
       <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 14.5, color: 'var(--ink)', textAlign: 'right' }}>{v}</span>
@@ -272,13 +274,7 @@ function SummaryScreen({ ctx, update, go, back }) {
         {line('pages', 'Reading pages', `${plan.reading} (p. ${firstRead}–${lastRead})`)}
         {plan.skipped > 0 && line('close', 'Skipped pages', plan.skipped)}
         {line('calendar', 'Rest days', REST_LABEL(rest).replace(' free', ''))}
-        {line('bell', 'Daily reminder', n.on ? fmt12(n.time) : 'Off')}
-        {line('flame', 'Streak rescue', n.rescue ? fmt12(n.rescueTime) : 'Off')}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
-          <Icon name="moon" size={18} style={{ color: 'var(--ink-2)' }} />
-          <span style={{ flex: 1, fontFamily: 'var(--font-ui)', fontSize: 14.5, color: 'var(--ink-2)' }}>Quiet hours</span>
-          <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 14.5, color: 'var(--ink)' }}>{q.on ? `${fmt12(q.from)} – ${fmt12(q.to)}` : 'Off'}</span>
-        </div>
+        {line('bell', 'Daily reminder', n.on ? fmt12(n.time) : 'Off', true)}
       </Group>
 
       <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)', margin: '6px 4px 8px', textTransform: 'uppercase', letterSpacing: 0.6 }}>Your first week</div>
