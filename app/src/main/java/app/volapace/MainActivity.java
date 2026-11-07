@@ -40,12 +40,12 @@ import java.util.concurrent.Executors;
  */
 public class MainActivity extends Activity {
     static final String ORIGIN = "https://volapace.local/";
-    private static final int REQ_PICK = 11, REQ_SAVE = 12, REQ_NOTIFY = 13;
+    private static final int REQ_PICK = 11, REQ_SAVE = 12, REQ_NOTIFY = 13, REQ_IMAGE = 14, REQ_STORAGE = 15;
 
-    WebView web;
+    ReaderWebView web;
     Library library;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private String pickCb, saveCb;
+    private String pickCb, saveCb, imageCb;
     private byte[] saveData;
     private String incoming;           // JSON of a book handed over by another app, until the UI takes it
     private boolean dark, askedNotify;
@@ -65,8 +65,9 @@ public class MainActivity extends Activity {
         else w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
 
         root = new FrameLayout(this);
-        web = new WebView(this);
+        web = new ReaderWebView(this);
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.setBackgroundColor(0xFFD90429); // matches the launch splash until the UI picks its theme
         setContentView(root);
 
         WebSettings s = web.getSettings();
@@ -201,6 +202,12 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         Uri uri = res == RESULT_OK && data != null ? data.getData() : null;
+        if (req == REQ_IMAGE) {
+            String cb = imageCb; imageCb = null;
+            if (uri == null) { resolve(cb, null); return; }
+            io.execute(() -> resolve(cb, squarePhoto(uri)));
+            return;
+        }
         if (req == REQ_PICK) {
             String cb = pickCb; pickCb = null;
             if (uri == null) { resolve(cb, null); return; }
@@ -214,6 +221,104 @@ public class MainActivity extends Activity {
                 resolve(cb, ok ? "true" : "false");
             });
         }
+    }
+
+    // ── profile photo: picked from the gallery, cropped to a 256 px square on the phone ──
+    void pickImage(String cb) {
+        if (imageCb != null) resolve(imageCb, null);
+        imageCb = cb;
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+        try { startActivityForResult(Intent.createChooser(i, null), REQ_IMAGE); } catch (Exception e) { resolve(cb, null); imageCb = null; }
+    }
+    private String squarePhoto(Uri uri) {
+        try {
+            android.graphics.Bitmap src;
+            if (Build.VERSION.SDK_INT >= 28) {
+                src = android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(getContentResolver(), uri), (dec, info, s) -> {
+                    int m = Math.min(info.getSize().getWidth(), info.getSize().getHeight());
+                    if (m > 1024) dec.setTargetSampleSize(m / 512);
+                    dec.setAllocator(android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE);
+                });
+            } else {
+                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options(); o.inSampleSize = 4;
+                try (InputStream in = getContentResolver().openInputStream(uri)) { src = android.graphics.BitmapFactory.decodeStream(in, null, o); }
+            }
+            int s = Math.min(src.getWidth(), src.getHeight());
+            android.graphics.Bitmap sq = android.graphics.Bitmap.createBitmap(src, (src.getWidth() - s) / 2, (src.getHeight() - s) / 2, s, s);
+            android.graphics.Bitmap out = android.graphics.Bitmap.createScaledBitmap(sq, 256, 256, true);
+            java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+            out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, b);
+            return new JSONObject().put("data", "data:image/jpeg;base64," + android.util.Base64.encodeToString(b.toByteArray(), android.util.Base64.NO_WRAP)).toString();
+        } catch (Throwable t) { return null; }
+    }
+
+    // ── books folder: ask for storage access, open it in the Files app ──
+    void requestFolderAccess() {
+        if (Library.sharedAllowed(this)) { library.relocateIfAllowed(); return; }
+        if (Build.VERSION.SDK_INT >= 30) {
+            try { startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getPackageName()))); }
+            catch (Exception e) { startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)); }
+        } else {
+            requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+        }
+    }
+    @Override public void onRequestPermissionsResult(int req, String[] p, int[] r) {
+        super.onRequestPermissionsResult(req, p, r);
+        if (req == REQ_STORAGE) { library.relocateIfAllowed(); js("window.__vp && __vp.resume()"); }
+    }
+    void openFolder() {
+        Uri doc = android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:" + library.relativePath());
+        Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(doc, android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        try { startActivity(view); return; } catch (Exception ignored) {}
+        try { startActivity(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI, doc)); return; } catch (Exception ignored) {}
+        android.widget.Toast.makeText(this, "Open your file manager and go to " + library.relativePath(), android.widget.Toast.LENGTH_LONG).show();
+    }
+
+    // ── updates: the only network request, made only when the user taps "Check for updates" ──
+    static final String RELEASES_API = "https://api.github.com/repos/nchanjifaithful/Volapace/releases/latest";
+    String appVersion() {
+        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return "1.0"; }
+    }
+    void checkUpdate(String cb) {
+        io.execute(() -> {
+            JSONObject out = new JSONObject();
+            java.net.HttpURLConnection c = null;
+            try {
+                out.put("current", appVersion());
+                c = (java.net.HttpURLConnection) new java.net.URL(RELEASES_API).openConnection();
+                c.setConnectTimeout(8000); c.setReadTimeout(8000);
+                c.setRequestProperty("Accept", "application/vnd.github+json");
+                c.setRequestProperty("User-Agent", "Volapace-Android");
+                if (c.getResponseCode() != 200) throw new Exception("HTTP " + c.getResponseCode());
+                StringBuilder sb = new StringBuilder();
+                try (InputStream in = c.getInputStream()) { byte[] b = new byte[8192]; int n; while ((n = in.read(b)) > 0) sb.append(new String(b, 0, n, "UTF-8")); }
+                JSONObject rel = new JSONObject(sb.toString());
+                String tag = rel.optString("tag_name", "").replaceFirst("^[vV]", "");
+                out.put("latest", tag);
+                out.put("url", rel.optString("html_url"));
+                out.put("notes", rel.optString("body", ""));
+                org.json.JSONArray assets = rel.optJSONArray("assets");
+                if (assets != null) for (int i = 0; i < assets.length(); i++) { String u = assets.getJSONObject(i).optString("browser_download_url"); if (u.endsWith(".apk")) { out.put("apk", u); break; } }
+                out.put("newer", newer(tag, appVersion()));
+            } catch (Exception e) {
+                try { out.put("error", "Couldn’t reach GitHub. Check your connection and try again."); } catch (Exception ignored) {}
+            } finally { if (c != null) c.disconnect(); }
+            resolve(cb, out.toString());
+        });
+    }
+    static boolean newer(String a, String b) {
+        String[] x = a.split("\\."), y = b.split("\\.");
+        for (int i = 0; i < Math.max(x.length, y.length); i++) {
+            int p = i < x.length ? num(x[i]) : 0, q = i < y.length ? num(y[i]) : 0;
+            if (p != q) return p > q;
+        }
+        return false;
+    }
+    private static int num(String s) { try { return Integer.parseInt(s.replaceAll("\\D.*$", "")); } catch (Exception e) { return 0; } }
+    void openUrl(String url) {
+        if (url == null || !url.startsWith("https://github.com/nchanjifaithful/Volapace")) return;
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
     }
 
     // ── "Open with" / "Share to" Volapace ──
@@ -263,7 +368,7 @@ public class MainActivity extends Activity {
     // ── lifecycle ──
     @Override protected void onResume() {
         super.onResume();
-        if (web != null) { web.onResume(); library.scan(); js("window.__vp && __vp.resume()"); }
+        if (web != null) { web.onResume(); library.relocateIfAllowed(); library.scan(); js("window.__vp && __vp.resume()"); }
     }
     @Override protected void onPause() { if (web != null) web.onPause(); super.onPause(); }
 

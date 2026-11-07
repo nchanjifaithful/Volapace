@@ -12,7 +12,7 @@ android {
         targetSdk = 34
         // Android needs this to rise with each update. Cloud builds number themselves.
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
-        versionName = "1.0"
+        versionName = "1.1"
     }
 
     // Cloud builds sign with one permanent key, because Android only installs an
@@ -41,6 +41,11 @@ android {
     }
 
     // The UI (React + pdf.js + fonts) is compiled into assets/www by `npm run build` in web/.
+    lint {
+        // MANAGE_EXTERNAL_STORAGE is intended: this app is distributed outside Google Play.
+        disable += setOf("ScopedStorage")
+    }
+
     androidResources {
         noCompress += listOf("woff2", "js")
     }

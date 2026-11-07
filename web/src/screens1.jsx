@@ -45,9 +45,9 @@ function UploadScreen({ go, startBook, openBook, onClose }) {
   return (
     <div style={{ minHeight: '100%', padding: 'calc(var(--sat) + 12px) 22px calc(var(--sab) + 40px)', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 34 }}>
-        {onClose ? <IconBtn name="arrowLeft" size={40} onClick={onClose} /> : <span style={{ fontFamily: 'var(--font-brand)', fontWeight: 800, fontSize: 27, color: 'var(--ink)', letterSpacing: -1 }}>Volapace</span>}
+        {onClose ? <IconBtn name="arrowLeft" size={40} onClick={onClose} /> : <Brand logo={30} size={26} />}
         {onClose ? <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>Add a book</span> : null}
-        <IconBtn name="user" size={40} onClick={() => go('you')} />
+        {onClose ? <div style={{ width: 40 }} /> : <IconBtn name="user" size={40} onClick={() => go('you')} />}
       </div>
 
       <h1 style={{ fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: 34, lineHeight: 1.08, color: 'var(--ink)', margin: '0 0 8px', letterSpacing: -0.8 }}>What are you<br/>reading next?</h1>
@@ -68,7 +68,7 @@ function UploadScreen({ go, startBook, openBook, onClose }) {
         <Button variant="soft" icon="book" style={{ flex: 1, fontSize: 14.5 }} onClick={() => go('scan')}>Add a paper book</Button>
       </div>
       <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 14, lineHeight: 1.45, textAlign: 'center' }}>
-        PDFs you copy into <b style={{ fontWeight: 600, color: 'var(--ink-2)' }}>{Platform.folderLabel()}</b> show up here automatically.
+        <FolderHint />
       </div>
 
       {recent.length > 0 && (
@@ -156,3 +156,16 @@ function Stepper({ label, onClick }) {
 }
 
 Object.assign(window, { UploadScreen, ScanScreen, Stepper });
+
+// Where PDFs come from, and (until it's allowed) a way to use a top-level Volapace folder
+function FolderHint({ style = {} }) {
+  const [info, setInfo] = React.useState(() => Platform.folderInfo());
+  React.useEffect(() => Platform.onResume(() => setInfo(Platform.folderInfo())), []);
+  return (
+    <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.45, textAlign: 'center', ...style }}>
+      PDFs you copy into <b style={{ fontWeight: 600, color: 'var(--ink-2)' }}>{info.shared ? 'the Volapace folder' : info.path}</b> show up here automatically.
+      {info.canShare && <><br /><button onClick={() => Platform.requestFolderAccess()} style={{ marginTop: 6, background: 'none', border: 'none', padding: 4, cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--sage)', textDecoration: 'underline' }}>Use a Volapace folder in main storage</button></>}
+    </div>
+  );
+}
+Object.assign(window, { FolderHint });

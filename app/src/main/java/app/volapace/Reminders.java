@@ -24,7 +24,7 @@ import java.util.Set;
  * rescheduled after a reboot or a time-zone change without opening the app.
  *
  *  daily   - at the chosen time, unless today's goal is already met; moved past quiet hours.
- *  rescue  - 9 PM, only when a streak is running and today isn't done yet.
+ *  rescue  - at its own time (9 PM by default), only when a streak is running and today isn't done yet.
  */
 final class Reminders {
     static final String CHANNEL = "reminders";
@@ -51,7 +51,7 @@ final class Reminders {
             int[] hm = parse(cfg.optString("time", "20:00"));
             set(c, am, DAILY, next(hm[0], hm[1], cfg.optJSONObject("quiet")));
         }
-        if (cfg.optBoolean("rescue")) set(c, am, RESCUE, next(21, 0, null));
+        if (cfg.optBoolean("rescue")) { int[] r = parse(cfg.optString("rescueTime", "21:00")); set(c, am, RESCUE, next(r[0], r[1], null)); }
     }
 
     /** Called when an alarm fires: post if still useful, then schedule the next one. */

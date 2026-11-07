@@ -95,6 +95,33 @@ const Platform = (() => {
       return Promise.resolve(window.confirm(message ? title + '\n\n' + message : title));
     },
     toast(msg) { if (N) N.toast(msg); },
+    // Adds Highlight / Note to Android's text-selection menu while the reader is open.
+    setSelectionTools(on) { if (N && N.setSelectionTools) N.setSelectionTools(!!on); },
+    // Profile photo: resolves with a small square JPEG data URL, or null.
+    pickImage() {
+      if (N) return call((id) => N.pickImage(id)).then(r => (r && r.data) || null);
+      return new Promise((res) => {
+        const input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*';
+        input.onchange = () => {
+          const f = input.files[0]; if (!f) return res(null);
+          const img = new Image(); img.onload = () => {
+            const s = Math.min(img.width, img.height), c = document.createElement('canvas'); c.width = c.height = 256;
+            c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 256, 256);
+            res(c.toDataURL('image/jpeg', 0.85)); URL.revokeObjectURL(img.src);
+          };
+          img.onerror = () => res(null); img.src = URL.createObjectURL(f);
+        };
+        input.click();
+      });
+    },
+    // The books folder: { path, shared (top-level folder in use), canShare (permission can be asked) }
+    folderInfo() { return N && N.folderInfo ? JSON.parse(N.folderInfo()) : { path: 'Browser storage', shared: false, canShare: false }; },
+    requestFolderAccess() { if (N && N.requestFolderAccess) N.requestFolderAccess(); },
+    openFolder() { if (N && N.openFolder) N.openFolder(); },
+    appVersion() { return N && N.appVersion ? N.appVersion() : 'dev'; },
+    // Asks GitHub for the latest release (the only network request the app makes, and only when tapped).
+    checkUpdate() { return N && N.checkUpdate ? call((id) => N.checkUpdate(id)) : Promise.resolve({ error: 'Only available in the Android app' }); },
+    openUrl(url) { if (N && N.openUrl) N.openUrl(url); else window.open(url, '_blank'); },
     // A book handed to Volapace from another app ("Open with" / "Share"), if any.
     takeIncoming() { return N ? JSON.parse(N.takeIncoming() || 'null') : null; },
   };

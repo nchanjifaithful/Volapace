@@ -62,7 +62,9 @@ final class Library {
     }
 
     private final Context ctx;
-    private final File dir, indexFile, coverDir;
+    private final File indexFile, coverDir;
+    private volatile File dir;
+    private boolean shared;
     private final Map<String, Row> byName = new HashMap<>();   // file name -> row
     private final ExecutorService scanner = Executors.newSingleThreadExecutor();
     private final ExecutorService covers = Executors.newFixedThreadPool(2);
@@ -73,9 +75,8 @@ final class Library {
 
     Library(Context c) {
         ctx = c.getApplicationContext();
-        File base = ctx.getExternalFilesDir(null);
-        if (base == null) base = ctx.getFilesDir();
-        dir = new File(base, "Volapace");
+        shared = sharedAllowed(ctx);
+        dir = shared ? sharedDir() : appDir(ctx);
         dir.mkdirs();
         indexFile = new File(ctx.getFilesDir(), "index.json");
         coverDir = new File(ctx.getCacheDir(), "covers");
@@ -84,7 +85,41 @@ final class Library {
     }
 
     File folder() { return dir; }
-    String folderLabel() { return "Android/data/" + ctx.getPackageName() + "/files/Volapace"; }
+    String folderLabel() { return shared ? "Volapace (main storage)" : "Android/data/" + ctx.getPackageName() + "/files/Volapace"; }
+    boolean isShared() { return shared; }
+    String relativePath() { return shared ? "Volapace" : "Android/data/" + ctx.getPackageName() + "/files/Volapace"; }
+
+    // The books folder: a top-level "Volapace" folder in the phone's main storage once the user allows
+    // storage access (easy to find in any file manager or over USB), otherwise the app's own folder.
+    static File appDir(Context c) { File base = c.getExternalFilesDir(null); if (base == null) base = c.getFilesDir(); return new File(base, "Volapace"); }
+    @SuppressWarnings("deprecation")
+    static File sharedDir() { return new File(android.os.Environment.getExternalStorageDirectory(), "Volapace"); }
+    static boolean sharedAllowed(Context c) {
+        if (android.os.Build.VERSION.SDK_INT >= 30) return android.os.Environment.isExternalStorageManager();
+        return c.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Switch to the shared folder once access is granted, moving books already in the app folder. */
+    void relocateIfAllowed() {
+        if (shared || !sharedAllowed(ctx)) return;
+        File to = sharedDir();
+        if (!to.exists() && !to.mkdirs()) return;
+        scanner.execute(() -> {
+            File from = appDir(ctx);
+            File[] files = from.listFiles();
+            if (files != null) for (File f : files) {
+                if (!f.isFile()) continue;
+                File dest = new File(to, f.getName());
+                if (dest.exists()) { if (dest.length() == f.length()) f.delete(); continue; }
+                if (!f.renameTo(dest)) { try { copy(f, dest); f.delete(); } catch (Exception ignored) {} }
+            }
+            synchronized (this) { shared = true; dir = to; }
+            main.post(() -> { if (observer != null) { observer.stopWatching(); observer = null; } watch(); scan(); });
+        });
+    }
+    private static void copy(File a, File b) throws Exception {
+        try (InputStream in = new FileInputStream(a); OutputStream o = new FileOutputStream(b)) { byte[] buf = new byte[65536]; int n; while ((n = in.read(buf)) > 0) o.write(buf, 0, n); }
+    }
     void setListener(Listener l) { listener = l; }
 
     @SuppressWarnings("deprecation")

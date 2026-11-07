@@ -5,7 +5,7 @@ const SCREEN_PAD = { minHeight: '100%', padding: 'calc(var(--sat) + 12px) 22px c
 
 function TodayScreen({ go, hostRef, ctx = {}, update, account, openBook }) {
   const lib = useLib();
-  const hasPlan = !!(ctx.bookId && ctx.days);
+  const hasPlan = !!(ctx.bookId && ctx.days && !ctx.planDraft);
   if (!hasPlan) return <TodayEmpty go={go} ctx={ctx} account={account} lib={lib} openBook={openBook} />;
   return <TodayPlan go={go} hostRef={hostRef} ctx={ctx} update={update} account={account} lib={lib} openBook={openBook} />;
 }
@@ -15,11 +15,9 @@ function TodayHeader({ go, account }) {
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
       <div>
         <Eyebrow style={{ marginBottom: 2 }}>{TODAY.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</Eyebrow>
-        <div style={{ fontFamily: 'var(--font-brand)', fontWeight: 800, fontSize: 29, color: 'var(--ink)', letterSpacing: -1.1, lineHeight: 1.1 }}>Volapace</div>
+        <Brand logo={30} size={28} />
       </div>
-      <button onClick={() => go('you')} aria-label="Profile" style={{ width: 46, height: 46, borderRadius: 999, border: 'none', background: 'var(--sage)', color: '#fff', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {account && account.name && account.name.trim() ? account.name.trim()[0].toUpperCase() : <Icon name="user" size={22} />}
-      </button>
+      <Avatar account={account} size={46} onClick={() => go('you')} />
     </div>
   );
 }
@@ -84,7 +82,7 @@ function TodayPlan({ go, hostRef, ctx = {}, update, account, lib, openBook }) {
   const doneToday = doneSet(ctx).has(dayISO(TODAY));
   const isTime = plan.goalType === 'time';
   const minsToday = ctx.timeLog && ctx.timeLog.date === dayISO(TODAY) ? Math.floor(ctx.timeLog.secs / 60) : 0;
-  const [logged, setLogged] = React.useState(() => Math.max(0, Math.min(GOAL, (ctx.page || FROM) - FROM)));
+  const [logged, setLogged] = React.useState(() => ctx.hasPdf ? readInRange(ctx, FROM, TO) : 0);
   const [open, setOpen] = React.useState(false);
   const [done, setDone] = React.useState(doneToday);
   const pct = Math.min(100, (logged / GOAL) * 100);
@@ -197,14 +195,15 @@ function GoalCalendar({ range, ctx }) {
   const cell = (lv, extra = {}) => ({ borderRadius: 8, background: lv === 0 ? 'var(--fill)' : `color-mix(in srgb, var(--sage) ${25 + lv * 25}%, var(--surface))`, ...extra });
 
   if (range === 'week') {
-    const days = Array.from({ length: 7 }, (_, k) => day(6 - k));
+    const mon = weekStart();
+    const days = Array.from({ length: 7 }, (_, k) => shiftDay(mon, k));
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
         {days.map((d, k) => {
-          const done = set.has(dayISO(d)), today = k === 6;
+          const done = set.has(dayISO(d)), today = dayISO(d) === dayISO(TODAY), future = d > TODAY;
           return (
-            <div key={k} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--ink-3)' }}>{'SMTWTFS'[d.getDay()]}</span>
+            <div key={k} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, opacity: future ? 0.45 : 1 }}>
+              <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--ink-3)' }}>{'MTWTFSS'[k]}</span>
               <div style={{ width: '100%', aspectRatio: '1 / 1.25', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
                 background: done ? 'var(--sage)' : 'var(--fill)', color: done ? '#fff' : 'var(--ink)', border: today && !done ? '1.5px dashed var(--ink-3)' : '1.5px solid transparent' }}>
                 <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 16 }}>{d.getDate()}</span>
@@ -217,11 +216,16 @@ function GoalCalendar({ range, ctx }) {
     );
   }
   if (range === 'month') {
-    const cells = Array.from({ length: 28 }, (_, k) => { const d = day(27 - k); return { d, lv: level(d) }; });
+    const y = TODAY.getFullYear(), mo = TODAY.getMonth(), last = new Date(y, mo + 1, 0).getDate();
+    const lead = (new Date(y, mo, 1).getDay() + 6) % 7; // blanks before the 1st (weeks start Monday)
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
-        {cells.slice(0, 7).map((c, k) => <div key={'l' + k} style={{ textAlign: 'center', fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--ink-3)', marginBottom: 2 }}>{'SMTWTFS'[c.d.getDay()]}</div>)}
-        {cells.map((c, k) => <div key={k} title={c.d.toDateString()} style={cell(c.lv, { aspectRatio: '1', outline: k === 27 ? '1.5px solid var(--ink)' : 'none', outlineOffset: 1 })} />)}
+        {'MTWTFSS'.split('').map((l, k) => <div key={'l' + k} style={{ textAlign: 'center', fontFamily: 'var(--font-ui)', fontSize: 11, color: 'var(--ink-3)', marginBottom: 2 }}>{l}</div>)}
+        {Array.from({ length: lead }, (_, k) => <div key={'b' + k} />)}
+        {Array.from({ length: last }, (_, k) => {
+          const d = new Date(y, mo, k + 1), future = d > TODAY, today = k + 1 === TODAY.getDate();
+          return <div key={k} title={d.toDateString()} style={cell(future ? 0 : level(d), { aspectRatio: '1', opacity: future ? 0.45 : 1, outline: today ? '1.5px solid var(--ink)' : 'none', outlineOffset: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-ui)', fontSize: 10.5, fontWeight: 500, color: !future && level(d) >= 2 ? '#fff' : 'var(--ink-3)' })}>{k + 1}</div>;
+        })}
       </div>
     );
   }
@@ -239,17 +243,18 @@ function GoalCalendar({ range, ctx }) {
 }
 
 function ProgressScreen({ ctx = {}, go, update, openModal, closeModal }) {
-  const [range, setRange] = React.useState('month');
+  const [range, setRange] = React.useState('week');
   const R = React.useMemo(() => rangeStats(ctx, range), [ctx.log, ctx.finished, range]);
   const life = lifetimeStats(ctx);
   const sum = R.summary || { pages: life.pages, hours: life.hours, books: life.books };
   const [sel, setSel] = React.useState(null);
   const bars = R.bars, maxV = Math.max(0.0001, ...bars.map(d => d.v));
   const anyBar = bars.some(d => d.v > 0);
-  const selIdx = sel == null || sel >= bars.length ? bars.reduce((m, d, i) => d.v > 0 ? i : m, range === 'year' ? TODAY.getMonth() : bars.length - 1) : sel;
+  const curIdx = range === 'year' ? TODAY.getMonth() : range === 'week' ? (TODAY.getDay() + 6) % 7 : Math.floor((TODAY.getDate() - 1) / 7);
+  const selIdx = sel == null || sel >= bars.length ? curIdx : sel;
   const selBar = bars[selIdx];
   const set = doneSet(ctx);
-  const span = range === 'week' ? 7 : range === 'month' ? 28 : 0;
+  const span = range === 'week' ? Math.round((TODAY - weekStart()) / 864e5) + 1 : range === 'month' ? TODAY.getDate() : 0;
   const metDays = span ? Array.from({ length: span }, (_, i) => set.has(dayISO(shiftDay(TODAY, -i)))).filter(Boolean).length : null;
   const pickRange = (k) => { setRange(k); setSel(null); };
   const tm = todayMinutes(ctx);
@@ -259,7 +264,7 @@ function ProgressScreen({ ctx = {}, go, update, openModal, closeModal }) {
     ? (() => { const doy = Math.floor((TODAY - new Date(TODAY.getFullYear(), 0, 1)) / 864e5) + 1; const exp = life.goal * doy / 365; const diff = life.books - exp;
         return { title: `${life.books} of ${life.goal} books this year`, sub: life.books >= life.goal ? 'Goal reached. Anything more is a bonus.' : `${life.goal - life.books} to go. ${Math.abs(diff) < 0.5 ? 'Right on pace.' : diff > 0 ? `${diff.toFixed(1)} books ahead of pace.` : `${(-diff).toFixed(1)} books behind pace.`}`, pct: (life.books / life.goal) * 100, marker: (exp / life.goal) * 100, edit: true }; })()
     : (() => {
-        const word = range === 'week' ? 'this week' : 'in the last 28 days', last = range === 'week' ? 'last week' : 'the 28 days before';
+        const word = range === 'week' ? 'this week' : 'this month', last = R.prevLabel;
         const d = sum.pages - R.prev;
         const sub = sum.pages === 0 && R.prev === 0 ? 'Pages you read or log will show up here.'
           : R.prev === 0 ? 'Your first stretch of history. Keep it going.'

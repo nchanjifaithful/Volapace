@@ -57,7 +57,7 @@ function useLib() {
 }
 
 // Fields that belong to one book (swapped in/out when you switch books)
-const BOOK_FIELDS = ['fromScan', 'planStart', 'planVer', 'bookId', 'title', 'author', 'pages', 'hasPdf', 'page', 'skip', 'days', 'ppd', 'doneDays', 'mode', 'time', 'remindOn', 'catchUp', 'bookmarks', 'highlights', 'goalType', 'minutes', 'planDays', 'finishedAt', 'pageLook', 'scrollMode', 'vSnap', 'readerZoom'];
+const BOOK_FIELDS = ['readPages', 'dayDates', 'restDays', 'planDraft', 'planStartDate', 'searchState', 'fromScan', 'planStart', 'planVer', 'bookId', 'title', 'author', 'pages', 'hasPdf', 'page', 'skip', 'days', 'ppd', 'doneDays', 'mode', 'time', 'remindOn', 'catchUp', 'bookmarks', 'highlights', 'goalType', 'minutes', 'planDays', 'finishedAt', 'pageLook', 'scrollMode', 'vSnap', 'readerZoom'];
 const pickBook = (ctx) => BOOK_FIELDS.reduce((o, k) => (ctx[k] !== undefined ? { ...o, [k]: ctx[k] } : o), {});
 const clearBook = (ctx) => { const c = { ...ctx }; BOOK_FIELDS.forEach(k => delete c[k]); return c; };
 
@@ -100,7 +100,7 @@ const PdfStore = {
     this._opening = (async () => {
       const lib = await loadPdfJs();
       const src = await Platform.pdfSource(id);
-      const doc = await lib.getDocument({ ...src, isEvalSupported: false }).promise;
+      const doc = await lib.getDocument({ ...src, isEvalSupported: false, cMapUrl: 'vendor/cmaps/', cMapPacked: true, standardFontDataUrl: 'vendor/standard_fonts/', useSystemFonts: false }).promise;
       if (this._openingId !== id) return doc;
       if (this.doc && this.doc !== doc) this.doc.destroy().catch(() => {});
       this.doc = doc; this.id = id; this.chapters = [];
@@ -154,19 +154,48 @@ function readingList(ctx) {
 function readIdx(list, p) { let lo = 0, hi = list.length; while (lo < hi) { const m = (lo + hi) >> 1; if (list[m] < p) lo = m + 1; else hi = m; } return lo; }
 
 const PAGES_PER_HOUR = 32;
+
+// The plan as a list of days. Pages are spread evenly over the days (or by the saved counts once
+// missed pages have been redistributed). Each day: { from, to, count, fromIdx, toIdx, status }.
+// status: 'done' | 'skipped' | 'today' | 'upcoming'. Everything derives from ctx, so every screen agrees.
+function planSchedule(ctx) {
+  const all = readingList(ctx);
+  const start = Math.min(all.length - 1, ctx.planStart || 0);
+  const list = all.slice(start), n = list.length;
+  const N = Math.max(1, ctx.days || 1);
+  const saved = ctx.planDays && ctx.planDays.ver === (ctx.planVer || 0) && Array.isArray(ctx.planDays.counts) && ctx.planDays.counts.length === N ? ctx.planDays.counts : null;
+  const base = Math.floor(n / N), rem = n - base * N;
+  const counts = saved || Array.from({ length: N }, (_, i) => base + (i < rem ? 1 : 0));
+  const skipped = new Set((ctx.planDays && ctx.planDays.ver === (ctx.planVer || 0) && ctx.planDays.skipped) || []);
+  const doneDays = ctx.doneDays || 0;
+  let cur = 0;
+  return counts.map((c, i) => {
+    const fromIdx = Math.min(n - 1, cur), toIdx = Math.min(n - 1, cur + Math.max(c, 1) - 1);
+    cur += c;
+    const status = i < doneDays ? (skipped.has(i) ? 'skipped' : 'done') : i === doneDays ? 'today' : 'upcoming';
+    return { i, count: c, fromIdx: start + fromIdx, toIdx: start + toIdx, from: list[fromIdx], to: list[toIdx], status, doneOn: (ctx.dayDates || {})[i] || null };
+  });
+}
+
 function planOf(ctx) {
   const pages = ctx.pages || 1;
   const goalType = ctx.goalType || 'pages';
   const minutes = ctx.minutes || 20;
   const list = readingList(ctx), n = list.length;
   const days = ctx.days || 1;
-  const ppd = ctx.ppd || Math.ceil(n / days);
   const doneDays = ctx.doneDays ?? 0;
   const start = Math.min(n - 1, ctx.planStart || 0);
-  const fromIdx = Math.min(n - 1, start + doneDays * ppd);
-  const toIdx = Math.min(n - 1, fromIdx + ppd - 1);
-  return { goalType, minutes, pages, list, reading: n, skipped: pages - n, days, ppd, doneDays, day: Math.min(days, doneDays + 1), fromIdx, from: list[fromIdx], to: list[toIdx], goal: toIdx - fromIdx + 1, title: ctx.title || 'Your book', finished: doneDays >= days || start + doneDays * ppd >= n, start };
+  const sched = planSchedule(ctx);
+  const di = Math.min(days - 1, doneDays);
+  const d = sched[di];
+  const ppd = ctx.ppd || Math.ceil((n - start) / days);
+  const finished = doneDays >= days;
+  return { goalType, minutes, pages, list, reading: n, skipped: pages - n, days, ppd, doneDays, day: Math.min(days, doneDays + 1), fromIdx: d.fromIdx, from: d.from, to: d.to, goal: d.toIdx - d.fromIdx + 1, title: ctx.title || 'Your book', finished, start, sched };
 }
+
+// Pages ticked as read (a set of page numbers), and how many of a day's pages are ticked
+const readSet = (ctx) => new Set(ctx.readPages || []);
+function readInRange(ctx, from, to) { const s = readSet(ctx); let k = 0; for (const p of readingList(ctx)) { if (p > to) break; if (p >= from && s.has(p)) k++; } return k; }
 
 // ── Streak model: set of ISO dates on which the daily goal was met ──
 const dayISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -177,10 +206,14 @@ function streakCount(set) {
   while (set.has(dayISO(d))) { n++; d = shiftDay(d, -1); }
   return n;
 }
+// Finish the current plan day: it counts toward the streak, and the plan moves to the next day.
 function markTodayDone(ctx) {
   const set = doneSet(ctx); set.add(dayISO(TODAY));
-  return { doneDates: [...set], doneDays: (ctx.doneDays ?? 0) + 1 };
+  const i = ctx.doneDays ?? 0;
+  if (ctx.days && i >= ctx.days) return { doneDates: [...set] };
+  return { doneDates: [...set], doneDays: i + 1, dayDates: { ...(ctx.dayDates || {}), [i]: dayISO(TODAY) } };
 }
+const todayIsDone = (ctx) => doneSet(ctx).has(dayISO(TODAY));
 
 // ── Streak strip ──────────────────────────────────────────────
 function StreakWeek({ ctx, compact, style = {} }) {
@@ -225,7 +258,11 @@ const RenderQ = { active: 0, max: 4, q: [],
   pump() { while (this.active < this.max && this.q.length) { const { job, res, rej } = this.q.shift(); this.active++; job().then(res, rej).finally(() => { this.active--; this.pump(); }); } },
 };
 
-function PdfPage({ doc, n, width, onSize, textLayer }) {
+// Renders one page sharply: the canvas is drawn at the device's pixel density (capped so very large
+// zooms don't run out of memory), into an offscreen canvas first so the old image stays until the new
+// one is ready (no blank flash while zooming). The text layer enables selection, copy and search hits.
+const MAX_CANVAS_PX = 16e6;
+function PdfPage({ doc, n, width, onSize, textLayer, onText }) {
   const ref = React.useRef(null);
   const tl = React.useRef(null);
   React.useEffect(() => {
@@ -235,22 +272,34 @@ function PdfPage({ doc, n, width, onSize, textLayer }) {
       if (cancelled) return;
       const base = page.getViewport({ scale: 1 });
       const scale = width / base.width;
-      const vp = page.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
+      let px = scale * Math.min(3, window.devicePixelRatio || 1);
+      const area = base.width * base.height * px * px;
+      if (area > MAX_CANVAS_PX) px *= Math.sqrt(MAX_CANVAS_PX / area);
+      const vp = page.getViewport({ scale: px });
       const c = ref.current; if (!c) return;
-      c.width = vp.width; c.height = vp.height;
-      c.style.width = width + 'px'; c.style.height = (base.height * scale) + 'px';
-      onSize && onSize(base.height * scale);
-      task = page.render({ canvasContext: c.getContext('2d'), viewport: vp });
+      const cssH = base.height * scale;
+      c.style.width = width + 'px'; c.style.height = cssH + 'px';
+      onSize && onSize(cssH);
+      const off = document.createElement('canvas');
+      off.width = Math.floor(vp.width); off.height = Math.floor(vp.height);
+      const g = off.getContext('2d', { alpha: false });
+      g.fillStyle = '#fff'; g.fillRect(0, 0, off.width, off.height);
+      task = page.render({ canvasContext: g, viewport: vp, intent: 'display' });
       if (textLayer && tl.current && window.pdfjsLib.renderTextLayer) {
-        const box = tl.current; box.innerHTML = ''; box.style.setProperty('--scale-factor', scale);
-        page.getTextContent().then(tc => {
+        const box = tl.current; box.style.setProperty('--scale-factor', scale);
+        page.getTextContent({ includeMarkedContent: false }).then(tc => {
           if (cancelled) return;
+          box.innerHTML = '';
           ttask = window.pdfjsLib.renderTextLayer({ textContentSource: tc, container: box, viewport: page.getViewport({ scale }), textDivs: [] });
-          ttask.promise && ttask.promise.catch(() => {});
+          if (ttask.promise) ttask.promise.then(() => { if (!cancelled && onText) onText(box); }).catch(() => {});
         });
       }
       if (!thumb && n < doc.numPages) doc.getPage(n + 1); // warm next page (reader only)
-      return task.promise.catch(() => {});
+      return task.promise.then(() => {
+        if (cancelled || !ref.current) return;
+        const v = ref.current; v.width = off.width; v.height = off.height;
+        v.getContext('2d', { alpha: false }).drawImage(off, 0, 0);
+      }).catch(() => {});
     });
     if (thumb) RenderQ.run(() => cancelled ? Promise.resolve() : work()); else work();
     return () => { cancelled = true; task && task.cancel(); ttask && ttask.cancel && ttask.cancel(); };
@@ -410,4 +459,4 @@ function PdfCover({ w, radius = 8, style = {} }) {
 }
 
 Lib.heal();
-Object.assign(window, { dedupeLibrary, Lib, BOOK_FIELDS, pickBook, clearBook, PAGES_PER_HOUR, SamplePage, SAMPLE_PARA, SAMPLE_CH, PdfCover, PagePicker, parseRanges, compactRanges, readingList, readIdx, ProgressCard, currentBook, bookPage, PdfStore, loadPdfJs, planOf, doneSet, streakCount, markTodayDone, dayISO, StreakWeek, PdfPage });
+Object.assign(window, { planSchedule, readSet, readInRange, todayIsDone, dedupeLibrary, Lib, BOOK_FIELDS, pickBook, clearBook, PAGES_PER_HOUR, SamplePage, SAMPLE_PARA, SAMPLE_CH, PdfCover, PagePicker, parseRanges, compactRanges, readingList, readIdx, ProgressCard, currentBook, bookPage, PdfStore, loadPdfJs, planOf, doneSet, streakCount, markTodayDone, dayISO, StreakWeek, PdfPage });

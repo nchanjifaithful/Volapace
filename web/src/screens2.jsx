@@ -4,11 +4,19 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 const WDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 // TODAY comes from platform.jsx (the real local date).
 
-function addReadingDays(start, n, skipSundays) {
+// Rest days: weekdays kept free as a catch-up buffer (0 = Sun … 6 = Sat).
+// Older plans stored a boolean (true = Sundays free).
+const restOf = (r) => Array.isArray(r) ? r : r === false ? [] : [0];
+const restDaysOf = (ctx) => restOf(ctx.restDays !== undefined ? ctx.restDays : ctx.catchUp);
+const REST_LABEL = (r) => { const s = restOf(r); return s.length === 0 ? 'No rest days' : s.length === 2 ? 'Weekends free' : s[0] === 6 ? 'Saturdays free' : 'Sundays free'; };
+
+function addReadingDays(start, n, rest) {
+  const off = new Set(restOf(rest));
+  if (off.size >= 7) off.clear();
   const d = new Date(start); let added = 0;
   while (added < n) {
     d.setDate(d.getDate() + 1);
-    if (skipSundays && d.getDay() === 0) continue;
+    if (off.has(d.getDay())) continue;
     added++;
   }
   return d;
@@ -22,9 +30,10 @@ const MODES = {
   scholar:  { label: 'Scholar',  days: 30, desc: 'Small daily increments, deep notes', icon: 'sparkle' },
 };
 
-function readingDaysUntil(target, skipSundays) {
+function readingDaysUntil(target, rest) {
+  const off = new Set(restOf(rest));
   let n = 0; const d = new Date(TODAY);
-  while (d < target && n < 400) { d.setDate(d.getDate() + 1); if (skipSundays && d.getDay() === 0) continue; n++; }
+  while (d < target && n < 400) { d.setDate(d.getDate() + 1); if (off.has(d.getDay())) continue; n++; }
   return Math.max(1, n);
 }
 const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -61,19 +70,19 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
   const [days, setDays] = React.useState(14);
   const [ppd, setPpd] = React.useState(16);
   const [mins, setMins] = React.useState(20);
-  const [remindOn, setRemindOn] = React.useState(() => ctx.notify ? !!ctx.notify.on : true);
-  const [time, setTime] = React.useState(() => (ctx.notify && ctx.notify.time) || '20:00');
-  const [catchUp, setCatchUp] = React.useState(true);
+
+
+  const rest = restDaysOf(ctx);
 
   const pickMode = (m) => { setMode(m); const d = MODES[m].days; setDays(d); setPpd(Math.ceil(pages / d)); setBasis('deadline'); };
   const timePpd = Math.max(1, Math.round(mins * PAGES_PER_HOUR / 60));
   const effDays = basis === 'deadline' ? days : basis === 'time' ? Math.max(1, Math.ceil(pages / timePpd)) : Math.max(1, Math.ceil(pages / ppd));
   const effPpd = basis === 'deadline' ? Math.ceil(pages / days) : basis === 'time' ? timePpd : ppd;
-  const finish = addReadingDays(TODAY, effDays, catchUp);
+  const finish = addReadingDays(TODAY, Math.max(0, effDays - 1), rest);
   const setD = (v) => { setDays(v); setMode('custom'); };
   const setP = (v) => { setPpd(v); setMode('custom'); };
   const setM = (v) => { setMins(v); setMode('custom'); };
-  const onDate = (v) => { if (!v) return; const [y, m, d] = v.split('-').map(Number); setD(Math.min(365, readingDaysUntil(new Date(y, m - 1, d), catchUp))); };
+  const onDate = (v) => { if (!v) return; const [y, m, d] = v.split('-').map(Number); setD(Math.min(365, readingDaysUntil(new Date(y, m - 1, d), rest) + 1)); };
 
   const sliderVal = basis === 'deadline' ? days : basis === 'time' ? mins : ppd;
   const sliderMin = basis === 'time' ? 5 : 1;
@@ -86,7 +95,7 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
       <button onClick={back} style={backBtn}><Icon name="arrowLeft" size={21} /></button>
 
       <div style={{ marginTop: 18, marginBottom: 22 }}>
-        <Eyebrow style={{ marginBottom: 4 }}>Step 2 of 2</Eyebrow>
+        <Eyebrow style={{ marginBottom: 4 }}>Step 2 of 4</Eyebrow>
         <h1 style={{ fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: 30, color: 'var(--ink)', margin: 0, lineHeight: 1.1, letterSpacing: -0.6 }}>Choose your pace</h1>
         <p style={{ fontFamily: 'var(--font-ui)', fontSize: 15, color: 'var(--ink-2)', margin: '6px 0 0' }}>{ctx.title || 'Your book'} &middot; {total} pages</p>
       </div>
@@ -126,7 +135,7 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
             <div style={{ ...label, marginTop: 16 }}>Or finish by date</div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, height: 50, padding: '0 14px', borderRadius: 14, background: 'var(--fill)', border: '1px solid var(--line)', cursor: 'pointer' }}>
               <Icon name="calendar" size={19} style={{ color: 'var(--ink-2)' }} />
-              <input type="date" value={isoDate(finish)} min={isoDate(addReadingDays(TODAY, 1, false))} onChange={e => onDate(e.target.value)}
+              <input type="date" value={isoDate(finish)} min={isoDate(addReadingDays(TODAY, 1, []))} onChange={e => onDate(e.target.value)}
                 style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15.5, color: 'var(--ink)', colorScheme: 'light dark' }} />
             </label>
           </>
@@ -171,23 +180,9 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
         </div>
       </div>
 
-      <div style={{ borderRadius: 'var(--card-radius)', border: '1px solid var(--line)', marginBottom: 22 }}>
-        <OptionRow icon="bell" title="Reminder" sub={remindOn ? `Daily at ${fmt12(time)}` : 'Off'} control={<Toggle on={remindOn} onChange={setRemindOn} />} />
-        {remindOn && (
-          <div style={{ padding: '0 16px 14px' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 10, height: 50, padding: '0 14px', borderRadius: 14, background: 'var(--fill)', border: '1px solid var(--line)', cursor: 'pointer' }}>
-              <Icon name="clock" size={19} style={{ color: 'var(--ink-2)' }} />
-              <input type="time" value={time} onChange={e => e.target.value && setTime(e.target.value)}
-                style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15.5, color: 'var(--ink)', colorScheme: 'light dark' }} />
-            </label>
-          </div>
-        )}
-        <div style={{ height: 1, background: 'var(--line)', margin: '0 16px' }} />
-        <OptionRow icon="refresh" title="Catch-up days" sub="Keep Sundays free as a buffer" control={<Toggle on={catchUp} onChange={setCatchUp} />} last />
-      </div>
-
-      <Button full icon="arrowRight" onClick={() => go('book', { pages: total, skip, doneDays: 0, page: startP, goalType: basis === 'time' ? 'time' : 'pages', minutes: mins, highlights: ctx.highlights || [], bookmarks: ctx.bookmarks || [], days: effDays, ppd: effPpd, mode: mode === 'custom' ? 'Custom' : MODES[mode].label, time: fmt12(time), remindOn, catchUp, planStart: 0, planVer: (ctx.planVer || 0) + 1, planDays: null, finishedAt: null, notify: { rescue: true, ...(ctx.notify || {}), on: remindOn, time } })}>
-        Build my plan
+      <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-2)', textAlign: 'center', margin: '4px 0 14px' }}>{REST_LABEL(rest)} &middot; you can change rest days next</div>
+      <Button full icon="arrowRight" onClick={() => go('reminders', { pages: total, skip, doneDays: 0, page: startP, goalType: basis === 'time' ? 'time' : 'pages', minutes: mins, highlights: ctx.highlights || [], bookmarks: ctx.bookmarks || [], days: effDays, ppd: effPpd, mode: mode === 'custom' ? 'Custom' : MODES[mode].label, restDays: rest, planStart: 0, planVer: (ctx.planVer || 0) + 1, planDays: null, finishedAt: null, readPages: [], planDraft: true, planStartDate: dayISO(TODAY) })}>
+        Next: reminders
       </Button>
     </div>
   );
@@ -226,4 +221,4 @@ function OptionRow({ icon, title, sub, control, last }) {
 
 const backBtn = { width: 40, height: 40, borderRadius: 999, background: 'var(--surface)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink)', cursor: 'pointer' };
 
-Object.assign(window, { NumField, PaceScreen, addReadingDays, fmtDate });
+Object.assign(window, { NumField, PaceScreen, addReadingDays, fmtDate, restOf, restDaysOf, REST_LABEL, readingDaysUntil, isoDate, fmt12 });

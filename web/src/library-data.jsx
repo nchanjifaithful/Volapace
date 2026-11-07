@@ -55,7 +55,7 @@ function BookCover({ book, w = 150, radius = 10, style = {}, scanning = false, f
   const h = w * 1.5;
   const wrap = {
     width: w, height: h, borderRadius: radius, position: 'relative', overflow: 'hidden',
-    background: `linear-gradient(160deg, ${c.bg[0]} 0%, ${c.bg[1]} 100%)`,
+    background: c.bg[0],
     boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.06)',
     flexShrink: 0, ...style,
   };

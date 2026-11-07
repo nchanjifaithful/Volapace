@@ -1,13 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No INTERNET permission: Volapace works entirely offline, by design. -->
+    <!-- Everything works offline. INTERNET is used for one thing only: "Check for updates" in Profile,
+         which asks GitHub for the latest release when you tap it. The WebView itself can't reach the network. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets the books folder live in main storage (/Volapace) where file managers and USB can see it.
+         Asked for only when you tap "Use a Volapace folder"; without it the app keeps its own folder. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"
+        android:requestLegacyExternalStorage="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"

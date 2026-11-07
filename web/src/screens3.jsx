@@ -12,80 +12,77 @@ function chaptersFor(start, end, chs) {
 const withCh = (s, ch) => ch ? `${s} · ${ch}` : s;
 
 function PlanScreen({ ctx, update, go, restart, hostRef, onBack, openModal, closeModal }) {
-  const readList = React.useMemo(() => readingList(ctx).slice(Math.min(ctx.planStart || 0, Math.max(0, readingList(ctx).length - 1))), [ctx.pages, ctx.skip, ctx.planStart]);
-  const pages = readList.length;
   const N = ctx.days || 1;
   const chs = useChapters();
   React.useEffect(() => { if (ctx.hasPdf && ctx.bookId && PdfStore.id !== ctx.bookId) PdfStore.openId(ctx.bookId).catch(() => {}); }, [ctx.bookId]);
-  const saved = ctx.planDays && ctx.planDays.ver === (ctx.planVer || 0) && ctx.planDays.counts.length === N ? ctx.planDays : null;
-  const catchUp = ctx.catchUp ?? true;
+  const rest = restDaysOf(ctx);
 
-  // initial even distribution
-  const initCounts = React.useMemo(() => {
-    const base = Math.floor(pages / N), rem = pages - base * N;
-    return Array.from({ length: N }, (_, i) => base + (i < rem ? 1 : 0));
-  }, [pages, N]);
-
-  const [counts, setCounts] = React.useState(() => saved ? saved.counts : initCounts);
-  const [statuses, setStatuses] = React.useState(() => saved ? saved.statuses : Array.from({ length: N }, (_, i) => i < (ctx.doneDays ?? 0) ? 'done' : 'upcoming'));
-  const [reminders, setReminders] = React.useState(() => saved && saved.reminders ? saved.reminders : Array(N).fill(true));
-  const [streak, setStreak] = React.useState(() => streakCount(doneSet(ctx)));
-  const [microRead, setMicroRead] = React.useState(0);
-  const [banner, setBanner] = React.useState(false);
-  const [expanded, setExpanded] = React.useState(null);
-
-  const focus = statuses.findIndex(s => s === 'upcoming');
-  React.useEffect(() => { update && update({ planDays: { ver: ctx.planVer || 0, counts, statuses, reminders } }); }, [counts, statuses, reminders]);
+  // everything below derives from ctx (planSchedule), so it updates as soon as you read anywhere
+  const sched = planSchedule(ctx);
+  const counts = sched.map(d => d.count);
+  const statuses = sched.map(d => (d.status === 'today' ? 'upcoming' : d.status));
+  const ranges = sched.map(d => [d.from, d.to]);
+  const pd = ctx.planDays && ctx.planDays.ver === (ctx.planVer || 0) ? ctx.planDays : {};
+  const reminders = Array.isArray(pd.reminders) && pd.reminders.length === N ? pd.reminders : Array(N).fill(true);
+  const skippedIdx = pd.skipped || [];
+  const streak = streakCount(doneSet(ctx));
+  const focus = (ctx.doneDays || 0) < N ? (ctx.doneDays || 0) : -1;
   const doneCount = statuses.filter(s => s === 'done').length;
   const allDone = focus === -1;
+  const todayDone = todayIsDone(ctx);
+  const [microRead, setMicroRead] = React.useState(() => focus >= 0 && ctx.hasPdf ? readInRange(ctx, ranges[focus][0], ranges[focus][1]) : 0);
+  React.useEffect(() => { if (focus >= 0 && ctx.hasPdf) setMicroRead(readInRange(ctx, ranges[focus][0], ranges[focus][1])); }, [ctx.readPages, focus]);
+  const [banner, setBanner] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(null);
+  const savePD = (patch) => update({ planDays: { ver: ctx.planVer || 0, counts, skipped: skippedIdx, reminders, ...patch } });
 
-  // page ranges (skipped resolved days contribute 0)
-  const ranges = React.useMemo(() => {
-    let cur = 1; const r = [];
-    counts.forEach((c) => { const start = cur; const end = Math.max(start, cur + c - 1); r.push([readList[start - 1] || start, readList[end - 1] || end]); cur += c; });
-    return r;
-  }, [counts, readList]);
-
-  // the focused day is today; earlier days count back, later days follow the reading calendar
-  const todayDone = doneSet(ctx).has(dayISO(TODAY));
-  // the day finished today (or the focused day) is today; earlier days count back, later ones follow the reading calendar
-  const anchor = focus < 0 ? N - 1 : todayDone && focus > 0 ? focus - 1 : focus;
-  const dayDate = (i) => i === anchor ? TODAY : i < anchor ? shiftDay(TODAY, i - anchor) : addReadingDays(TODAY, i - anchor, catchUp);
+  // dates: finished days show the day they were finished; the focused day is today (tomorrow once today is done)
+  const dayDate = (i) => {
+    if (sched[i].doneOn) return new Date(sched[i].doneOn + 'T00:00:00');
+    const f = focus < 0 ? N : focus;
+    if (i < f) return shiftDay(TODAY, i - f);
+    const k = i - f + (todayDone ? 1 : 0);
+    return k === 0 ? TODAY : addReadingDays(TODAY, k, rest);
+  };
 
   const completeDay = () => {
     if (focus < 0) return;
-    setStatuses(s => s.map((v, i) => i === focus ? 'done' : v));
-    setStreak(v => v + 1);
-    update && update({ ...markTodayDone(ctx), logPages: microRead, page: Math.min(ctx.pages || 1, Math.max(ctx.page || 1, (ranges[focus] ? ranges[focus][1] : 0) + 1)) });
+    const [a, b] = ranges[focus];
+    const pagesIn = readingList(ctx).filter(p => p >= a && p <= b);
+    const rs = readSet(ctx); const fresh = pagesIn.filter(p => !rs.has(p));
+    update({ ...markTodayDone(ctx), readPages: [...rs, ...pagesIn].sort((x, y) => x - y), logPages: ctx.hasPdf ? fresh.length : microRead, page: Math.min(ctx.pages || 1, Math.max(ctx.page || 1, b + 1)) });
     setMicroRead(0);
     if (hostRef.current) fireConfetti(hostRef.current);
   };
 
-  const [toast, setToast] = React.useState(null); // { prev: {counts, statuses}, text }
-  const spread = (st, cs) => {
-    const upcoming = st.map((s, i) => s === 'upcoming' ? i : -1).filter(i => i >= 0);
-    const leftover = st.reduce((sum, s, i) => s === 'skipped' ? sum + cs[i] : sum, 0);
+  const [toast, setToast] = React.useState(null); // { prev: { planDays, doneDays }, text }
+  // move the pages of skipped days onto the days still to come
+  const spread = (skipped, cs, from) => {
+    const upcoming = cs.map((_, i) => i).filter(i => i >= from);
+    const leftover = skipped.reduce((s, i) => s + cs[i], 0);
     if (!upcoming.length) return { counts: cs, n: 0, leftover };
     const add = Math.floor(leftover / upcoming.length), extra = leftover - add * upcoming.length;
-    return { n: upcoming.length, leftover, counts: cs.map((v, i) => st[i] === 'skipped' ? 0 : upcoming.indexOf(i) >= 0 ? v + add + (upcoming.indexOf(i) < extra ? 1 : 0) : v) };
+    return { n: upcoming.length, leftover, counts: cs.map((v, i) => skipped.includes(i) ? 0 : upcoming.indexOf(i) >= 0 ? v + add + (upcoming.indexOf(i) < extra ? 1 : 0) : v) };
   };
 
   const skipDay = () => {
     if (focus < 0) return;
-    const next = statuses.map((v, i) => i === focus ? 'skipped' : v);
-    setStatuses(next); setMicroRead(0);
+    const prev = { planDays: ctx.planDays || null, doneDays: ctx.doneDays || 0 };
+    const sk = [...skippedIdx, focus];
     if (ctx.autoCatchUp) {
-      const r = spread(next, counts);
-      setToast({ prev: { counts, statuses }, text: r.n ? `${r.leftover} missed pages spread across ${r.n} day${r.n === 1 ? '' : 's'}` : 'No days left to spread pages over' });
-      setCounts(r.counts);
-      setTimeout(() => setToast(t => t && t.prev.counts === counts ? null : t), 5000);
-    } else setBanner(true);
+      const r = spread([focus], counts, focus + 1);
+      update({ doneDays: focus + 1, planDays: { ver: ctx.planVer || 0, counts: r.counts, skipped: sk, reminders } });
+      setToast({ prev, text: r.n ? `${r.leftover} missed pages spread across ${r.n} day${r.n === 1 ? '' : 's'}` : 'No days left to spread pages over' });
+      setTimeout(() => setToast(null), 5000);
+    } else { update({ doneDays: focus + 1, planDays: { ver: ctx.planVer || 0, counts, skipped: sk, reminders } }); setBanner(true); }
   };
-  const undoSpread = () => { if (!toast) return; setCounts(toast.prev.counts); setStatuses(toast.prev.statuses); setToast(null); };
-
-  const recalculate = () => { setCounts(spread(statuses, counts).counts); setBanner(false); };
-
-  const toggleReminder = (i) => setReminders(r => r.map((v, k) => k === i ? !v : v));
+  const undoSpread = () => { if (!toast) return; update({ planDays: toast.prev.planDays, doneDays: toast.prev.doneDays }); setToast(null); };
+  const recalculate = () => {
+    const pending = skippedIdx.filter(i => counts[i] > 0);
+    savePD({ counts: spread(pending, counts, focus < 0 ? N : focus).counts });
+    setBanner(false);
+  };
+  const toggleReminder = (i) => savePD({ reminders: reminders.map((v, k) => (k === i ? !v : v)) });
 
   const goal = focus >= 0 ? counts[focus] : 0;
   const microPct = goal ? Math.min(100, (microRead / goal) * 100) : 0;
@@ -104,8 +101,9 @@ function PlanScreen({ ctx, update, go, restart, hostRef, onBack, openModal, clos
             <Eyebrow style={{ marginBottom: 6 }}>{ctx.mode || 'Casual'} pace</Eyebrow>
             <h1 style={{ fontFamily: 'var(--font-serif)', fontWeight: 500, fontSize: 26, color: 'var(--ink)', margin: 0, lineHeight: 1.12, letterSpacing: -0.5 }}>{ctx.title || 'Your book'}</h1>
             <p style={{ fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', margin: '8px 0 0' }}>
-              {allDone ? 'Finished \u2014 nicely done' : `Day ${focus + 1} of ${N}`}
+              {allDone ? 'Finished \u2014 nicely done' : todayDone ? `Today\u2019s reading done \u00b7 Day ${focus + 1} next` : `Day ${focus + 1} of ${N}`}
             </p>
+            {streak > 0 && <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, padding: '5px 10px 5px 8px', borderRadius: 999, background: todayDone ? 'var(--sage)' : 'var(--fill)', color: todayDone ? '#fff' : 'var(--ink)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 12.5 }}><Icon name="flame" size={15} /> {streak}-day streak{todayDone ? ' \u00b7 today done' : ''}</div>}
           </div>
           <Ring value={(doneCount / N) * 100} size={84} stroke={9}>
             <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 19, color: 'var(--ink)', lineHeight: 1, letterSpacing: -0.4 }}>{doneCount}/{N}</div>
@@ -147,7 +145,7 @@ function PlanScreen({ ctx, update, go, restart, hostRef, onBack, openModal, clos
               <Icon name="check" size={32} stroke={2.4} />
             </div>
             <div style={{ fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: 23, color: 'var(--ink)' }}>Book complete</div>
-            <div style={{ fontFamily: 'var(--font-ui)', fontSize: 14.5, color: 'var(--ink-2)', margin: '6px 0 18px' }}>You read all {pages} pages. That&rsquo;s a {streak}-day streak.</div>
+            <div style={{ fontFamily: 'var(--font-ui)', fontSize: 14.5, color: 'var(--ink-2)', margin: '6px 0 18px' }}>You read all {planOf(ctx).reading} pages. That&rsquo;s a {streak}-day streak.</div>
             <Button variant="soft" full icon="plus" onClick={restart}>Start a new book</Button>
           </Card>
         )}
@@ -157,7 +155,7 @@ function PlanScreen({ ctx, update, go, restart, hostRef, onBack, openModal, clos
           if (st === 'done' || st === 'skipped') return <CompactDay key={i} i={i} st={st} range={ranges[i]} date={dayDate(i)} />;
           if (i === focus) {
             return (
-              <HeroDay key={i} ahead={anchor !== focus} chs={chs} i={i} N={N} goal={goal} range={ranges[i]} date={dayDate(i)}
+              <HeroDay key={i} ahead={todayDone} hasPdf={ctx.hasPdf} chs={chs} i={i} N={N} goal={goal} range={ranges[i]} date={dayDate(i)}
                 microRead={microRead} microPct={microPct}
                 onAdd={(p) => setMicroRead(m => Math.min(goal, m + p))}
                 onComplete={completeDay} onSkip={skipDay} onRead={ctx.hasPdf ? () => go('reader') : null} />
@@ -167,20 +165,34 @@ function PlanScreen({ ctx, update, go, restart, hostRef, onBack, openModal, clos
           return (
             <UpcomingDay key={i} chs={chs} i={i} range={ranges[i]} count={counts[i]} date={dayDate(i)}
               open={expanded === i} onToggle={() => setExpanded(expanded === i ? null : i)}
-              reminder={reminders[i]} onReminder={() => toggleReminder(i)} time={ctx.time} />
+              reminder={reminders[i]} onReminder={() => toggleReminder(i)} time={fmt12(notifyOf(ctx).time)} />
           );
         })}
+
+        {ctx.hasPdf && (
+          <div style={{ marginTop: 12 }}>
+            <SectionHead title="Bookmarks" action={(ctx.bookmarks || []).length ? `${ctx.bookmarks.length}` : null} />
+            {(ctx.bookmarks || []).length === 0
+              ? <div style={{ padding: '14px 16px', borderRadius: 16, background: 'var(--fill)', fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)' }}>Tap the bookmark in the reader to save a page here.</div>
+              : <BookmarkList pages={ctx.bookmarks} chs={chs} highlights={ctx.highlights || []} onOpen={p => go('reader', { page: p })} />}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function HeroDay({ ahead, chs, i, N, goal, range, date, microRead, microPct, onAdd, onComplete, onSkip, onRead }) {
+function HeroDay({ ahead, hasPdf, chs, i, N, goal, range, date, microRead, microPct, onAdd, onComplete, onSkip, onRead }) {
   return (
-    <Card pad={20} style={{ border: '1.5px solid var(--ink)' }}>
+    <Card pad={20} style={{ border: ahead ? '1px solid var(--line)' : '1.5px solid var(--ink)' }}>
+      {ahead && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 14, background: 'var(--sage-soft)', color: 'var(--sage-deep)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13.5, marginBottom: 14 }}>
+          <Icon name="check" size={17} stroke={2.4} /> Today&rsquo;s reading is done. Read ahead if you like.
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--sage)' }}>{ahead ? 'Next' : 'Today'} &middot; Day {i + 1}</span>
+          <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: ahead ? 'var(--ink-2)' : 'var(--sage)' }}>{ahead ? 'Up next' : 'Today'} &middot; Day {i + 1}</span>
         </div>
         <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--ink-2)' }}>{fmtDate(date)}</span>
       </div>
@@ -195,25 +207,47 @@ function HeroDay({ ahead, chs, i, N, goal, range, date, microRead, microPct, onA
       {/* micro progress */}
       <div style={{ marginTop: 18, marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 7 }}>
-          <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--ink-2)', fontWeight: 600 }}>{microRead} of {goal} pages read</span>
+          <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--ink-2)', fontWeight: 600 }}>{microRead} of {goal} pages {hasPdf ? 'ticked as read' : 'read'}</span>
           <span style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--sage-deep)', fontWeight: 700 }}>{Math.round(microPct)}%</span>
         </div>
         <ProgressBar value={microPct} height={9} />
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        {!hasPdf && <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           {[5, 10].map(p => (
             <button key={p} onClick={() => onAdd(p)} style={{ flex: 1, height: 38, borderRadius: 999, border: '1px solid var(--line)', background: 'var(--fill)', color: 'var(--ink)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
               <Icon name="plus" size={15} /> {p} pages
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
-      {onRead && <Button full icon="book" onClick={onRead}>Start reading</Button>}
-      <Button full variant={onRead ? "soft" : "primary"} icon="check" onClick={onComplete} style={{ marginTop: onRead ? 8 : 0 }}>Mark today complete</Button>
-      <button onClick={onSkip} style={{ width: '100%', marginTop: 10, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 14, color: 'var(--ink-3)' }}>
+      {onRead && <Button full icon="book" onClick={onRead}>{ahead ? 'Read ahead' : 'Start reading'}</Button>}
+      <Button full variant={onRead ? "soft" : "primary"} icon="check" onClick={onComplete} style={{ marginTop: onRead ? 8 : 0 }}>{ahead ? `Mark Day ${i + 1} complete too` : 'Mark today complete'}</Button>
+      {!ahead && <button onClick={onSkip} style={{ width: '100%', marginTop: 10, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 14, color: 'var(--ink-3)' }}>
         I missed today
-      </button>
+      </button>}
     </Card>
+  );
+}
+
+// Saved pages, each opening the reader at that page
+function BookmarkList({ pages, chs, highlights = [], onOpen, title }) {
+  return (
+    <div style={{ borderRadius: 16, border: '1px solid var(--line)', background: 'var(--surface)', overflow: 'hidden' }}>
+      {[...pages].sort((a, b) => a - b).map((p, k, arr) => {
+        const ch = chaptersFor(p, p, chs);
+        const notes = highlights.filter(h => h.page === p).length;
+        return (
+          <button key={p} onClick={() => onOpen(p)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: 'none', border: 'none', borderBottom: k < arr.length - 1 ? '1px solid var(--line)' : 'none', cursor: 'pointer', textAlign: 'left' }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--sage-soft)', color: 'var(--sage)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon name="bookmarkOn" size={17} /></div>
+            <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-ui)' }}>
+              <div style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--ink)' }}>{title ? `${title} · ` : ''}Page {p}</div>
+              {(ch || notes > 0) && <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[ch, notes ? `${notes} note${notes === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</div>}
+            </div>
+            <Icon name="chevronRight" size={18} style={{ color: 'var(--ink-3)' }} />
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -275,11 +309,11 @@ function EditPlanSheet({ ctx, update, close }) {
   const [days, setDays] = React.useState(Math.max(1, Math.ceil(left / plan.ppd)));
   const [ppd, setPpd] = React.useState(plan.ppd);
   const [mins, setMins] = React.useState(plan.minutes);
-  const [catchUp, setCatchUp] = React.useState(ctx.catchUp ?? true);
+  const [rest, setRest] = React.useState(() => restDaysOf(ctx));
   const ppdN = basis === 'days' ? Math.ceil(left / days) : basis === 'pages' ? ppd : Math.max(1, Math.round(mins * PAGES_PER_HOUR / 60));
   const daysN = basis === 'days' ? days : Math.max(1, Math.ceil(left / ppdN));
-  const finish = addReadingDays(TODAY, daysN, catchUp);
-  const save = () => { update({ planStart: ri, doneDays: 0, days: daysN, ppd: ppdN, goalType: basis === 'time' ? 'time' : 'pages', minutes: mins, catchUp, mode: 'Custom', planVer: (ctx.planVer || 0) + 1 }); close(); };
+  const finish = addReadingDays(TODAY, Math.max(0, daysN - 1), rest);
+  const save = () => { update({ planStart: ri, doneDays: 0, days: daysN, ppd: ppdN, goalType: basis === 'time' ? 'time' : 'pages', minutes: mins, restDays: rest, dayDates: {}, mode: 'Custom', planVer: (ctx.planVer || 0) + 1 }); close(); };
   const stat = (n, l) => <div style={{ flex: 1 }}><div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 18, color: 'var(--ink)', letterSpacing: -0.3 }}>{n}</div><div style={{ fontFamily: 'var(--font-ui)', fontSize: 11.5, color: 'var(--ink-2)', marginTop: 1 }}>{l}</div></div>;
   return (
     <BottomSheet>
@@ -297,13 +331,8 @@ function EditPlanSheet({ ctx, update, close }) {
       {basis === 'days' && <NumField value={days} onChange={setDays} min={1} max={365} suffix={days === 1 ? 'day' : 'days'} />}
       {basis === 'pages' && <NumField value={ppd} onChange={setPpd} min={1} max={left} suffix="pages" />}
       {basis === 'time' && <NumField value={mins} onChange={setMins} min={5} max={240} suffix="min" />}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 2px 4px' }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15, color: 'var(--ink)' }}>Catch-up days</div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 1 }}>Keep Sundays free</div>
-        </div>
-        <Toggle on={catchUp} onChange={setCatchUp} />
-      </div>
+      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15, color: 'var(--ink)', margin: '16px 2px 8px' }}>Rest days</div>
+      <RestDaysPicker value={rest} onChange={setRest} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, borderRadius: 16, background: 'var(--sage)', color: '#fff', margin: '12px 0 18px' }}>
         <Icon name="target" size={22} />
         <div style={{ flex: 1, fontFamily: 'var(--font-ui)' }}>
@@ -377,4 +406,4 @@ function TabBar({ active, onNav }) {
   );
 }
 
-Object.assign(window, { PlanScreen, TabBar, EditPlanSheet, ResetSheet });
+Object.assign(window, { PlanScreen, TabBar, EditPlanSheet, ResetSheet, BookmarkList, chaptersFor });

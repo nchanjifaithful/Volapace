@@ -48,12 +48,11 @@ function VirtualRows({ count, rowHeight, render, overscan = 4 }) {
   return <div ref={ref} style={{ position: 'relative', height: count * rowHeight }}>{rows}</div>;
 }
 
-function LibraryScreen({ go, ctx = {}, openBook, forget }) {
+function LibraryScreen({ go, ctx = {}, openBook, forget, openModal, closeModal }) {
   const [filter, setFilter] = React.useState('all');
   const [view, setView] = React.useState('grid');
   const [openId, setOpenId] = React.useState(null);
   const [q, setQ] = React.useState('');
-  const [searching, setSearching] = React.useState(false);
   const lib = useLib();
   const ALL = React.useMemo(() => lib.map(e => entryBook(e, ctx)), [lib, ctx]);
   const needle = q.trim().toLowerCase();
@@ -87,17 +86,18 @@ function LibraryScreen({ go, ctx = {}, openBook, forget }) {
     <div style={{ ...SCREEN_PAD, position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
         <h1 style={H1}>Library</h1>
-        {ALL.length > 0 && <IconBtn name={searching ? 'close' : 'search'} onClick={() => { setSearching(s => !s); setQ(''); }} />}
+        {ALL.length > 0 && <IconBtn name="bookmark" onClick={() => openModal(<AllBookmarksSheet ctx={ctx} close={closeModal} onOpen={(e, p) => { closeModal(); openBook(e, p); }} />)} />}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', marginBottom: 16 }}>
         <Icon name="library" size={16} /> {ALL.length} book{ALL.length === 1 ? '' : 's'} on this phone &middot; {finished} finished
       </div>
 
-      {searching && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 48, padding: '0 16px', borderRadius: 999, background: 'var(--fill)', border: '1px solid var(--line)', marginBottom: 16 }}>
+      {ALL.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 48, padding: '0 16px', borderRadius: 999, background: 'var(--fill)', border: '1px solid var(--line)', marginBottom: 14 }}>
           <Icon name="search" size={19} style={{ color: 'var(--ink-3)' }} />
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Title or author"
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by title or author" enterKeyHint="search"
             style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--font-ui)', fontSize: 15.5, color: 'var(--ink)' }} />
+          {q && <button onClick={() => setQ('')} aria-label="Clear search" style={{ border: 'none', background: 'none', padding: 4, cursor: 'pointer', color: 'var(--ink-3)', display: 'flex' }}><Icon name="close" size={16} /></button>}
         </div>
       )}
 
@@ -105,7 +105,7 @@ function LibraryScreen({ go, ctx = {}, openBook, forget }) {
         <div style={{ textAlign: 'center', padding: '48px 12px 20px' }}>
           <div style={{ width: 64, height: 64, borderRadius: 999, background: 'var(--fill)', color: 'var(--ink-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}><Icon name="library" size={28} /></div>
           <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 17, color: 'var(--ink)' }}>Your shelf is empty</div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', marginTop: 6, lineHeight: 1.45 }}>Add a PDF or a paper book. PDFs you copy into <b style={{ fontWeight: 600 }}>{Platform.folderLabel()}</b> appear here too.</div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', marginTop: 6, lineHeight: 1.45 }}>Add a PDF or a paper book. PDFs in your Volapace folder appear here too.</div>
           <div style={{ marginTop: 18 }}><Button icon="plus" onClick={() => go('upload')}>Add a book</Button></div>
         </div>
       ) : <>
@@ -146,11 +146,6 @@ function LibraryScreen({ go, ctx = {}, openBook, forget }) {
         )}
       </div>
       </>}
-      <div style={{ position: 'sticky', bottom: 'calc(var(--sab) + 108px)', height: 0, display: 'flex', justifyContent: 'flex-end', zIndex: 10 }}>
-        <button onClick={() => go('upload')} aria-label="Add a book" style={{ marginTop: -60, width: 58, height: 58, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--ink)', color: 'var(--cream)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.22)' }}>
-          <Icon name="plus" size={26} stroke={2.2} />
-        </button>
-      </div>
     </div>
   );
 }
@@ -252,22 +247,43 @@ function SwipeRow({ book, go, open, setOpen, onRemove }) {
 // TAB 4 — YOU
 // ════════════════════════════════════════════════════════════
 
-const DEFAULT_NOTIFY = { on: true, time: '20:00', rescue: true };
+const DEFAULT_NOTIFY = { on: true, time: '20:00', rescue: true, rescueTime: '21:00' };
 const DEFAULT_QUIET = { on: false, from: '09:00', to: '17:00', days: { Mon: true, Tue: true, Wed: true, Thu: true, Fri: true, Sat: false, Sun: false } };
 const notifyOf = (ctx) => ({ ...DEFAULT_NOTIFY, ...(ctx.notify || {}) });
 const quietOf = (ctx) => ({ ...DEFAULT_QUIET, ...(ctx.quiet || {}), days: { ...DEFAULT_QUIET.days, ...((ctx.quiet && ctx.quiet.days) || {}) } });
 
-function YouScreen({ theme, setTheme, openModal, closeModal, account, setAccount, ctx = {}, update }) {
+// Round avatar: the profile photo if there is one, else initials, else a person icon
+function Avatar({ account, size = 46, onClick, style = {} }) {
+  const name = (account && account.name || '').trim();
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+  const Tag = onClick ? 'button' : 'div';
+  return (
+    <Tag onClick={onClick} aria-label="Profile" style={{ width: size, height: size, borderRadius: 999, border: 'none', padding: 0, flexShrink: 0, overflow: 'hidden', background: 'var(--sage)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: Math.round(size * 0.38), cursor: onClick ? 'pointer' : 'default', ...style }}>
+      {account && account.photo ? <img src={account.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        : initials || <Icon name="user" size={Math.round(size * 0.45)} />}
+    </Tag>
+  );
+}
+
+const sinceLabel = (s) => { if (!s) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }); } return s; };
+
+function YouScreen({ theme, setTheme, openModal, closeModal, account, setAccount, ctx = {}, update, go }) {
   const themes = [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'cog']];
   const editAccount = () => openModal(<AccountSheet close={closeModal} account={account} onSave={setAccount} />);
   const name = (account.name || '').trim();
-  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
   const lib = useLib();
   const life = lifetimeStats(ctx);
-  const stats = [[lib.length, lib.length === 1 ? 'Book' : 'Books'], [life.streak, 'Day streak'], [life.hours, 'Hours']];
-  const n = notifyOf(ctx), qt = quietOf(ctx);
-  const qDays = Object.keys(qt.days).filter(d => qt.days[d]);
+  const stats = [[life.booksAll, 'Total books'], [life.streak, 'Day streak'], [life.hours, 'Total hours']];
+  const n = notifyOf(ctx);
+  const [folder, setFolder] = React.useState(() => Platform.folderInfo());
+  React.useEffect(() => Platform.onResume(() => setFolder(Platform.folderInfo())), []);
   const [rescanned, setRescanned] = React.useState(false);
+  const [upd, setUpd] = React.useState(null); // null | 'checking' | result
+  const changePhoto = () => openModal(<PhotoSheet close={closeModal} account={account} setAccount={setAccount} />);
+  const check = async () => { setUpd('checking'); setUpd(await Platform.checkUpdate()); };
+  const updSub = upd === 'checking' ? 'Checking GitHub…' : !upd ? `You have version ${Platform.appVersion()}` : upd.error ? upd.error : upd.newer ? `Version ${upd.latest} is available — tap to download` : `You’re up to date (${upd.current})`;
+  const reminderSub = n.on ? `Daily at ${fmt12(n.time)}${n.rescue ? ` · rescue ${fmt12(n.rescueTime)}` : ''}` : 'Off';
+  const iconBtn = (icon, label, onClick) => <button onClick={onClick} aria-label={label} title={label} style={{ width: 38, height: 38, borderRadius: 999, border: '1px solid var(--line)', background: 'var(--fill)', color: 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}><Icon name={icon} size={18} /></button>;
   return (
     <div style={SCREEN_PAD}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -276,10 +292,13 @@ function YouScreen({ theme, setTheme, openModal, closeModal, account, setAccount
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-        <div style={{ width: 64, height: 64, borderRadius: 999, background: 'var(--sage)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 24, flexShrink: 0 }}>{initials || <Icon name="user" size={28} />}</div>
+        <div style={{ position: 'relative' }}>
+          <Avatar account={account} size={64} onClick={changePhoto} />
+          <span style={{ position: 'absolute', right: -2, bottom: -2, width: 24, height: 24, borderRadius: 999, background: 'var(--ink)', color: 'var(--cream)', border: '2px solid var(--cream)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><Icon name="camera" size={12} /></span>
+        </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 20, color: name ? 'var(--ink)' : 'var(--ink-3)', letterSpacing: -0.3 }}>{name || 'Your name'}</div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)', marginTop: 2 }}>{account.since ? `Reading since ${account.since}` : account.email || 'Stored only on this phone'}</div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)', marginTop: 2 }}>{account.since ? `Reading since ${sinceLabel(account.since)}` : account.email || 'Stored only on this phone'}</div>
         </div>
         <button onClick={() => editAccount()} style={{ height: 34, padding: '0 14px', borderRadius: 999, border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--ink)', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>Edit</button>
       </div>
@@ -316,21 +335,51 @@ function YouScreen({ theme, setTheme, openModal, closeModal, account, setAccount
           </div>
           <Toggle on={!!ctx.autoCatchUp} onChange={v => update({ autoCatchUp: v })} />
         </div>
+        <PrefRow icon="bell" title="Reminders & rest days" sub={reminderSub} onClick={() => go('reminders')} />
         <PrefRow icon="target" title="Yearly goal" sub={`${life.goal} books in ${TODAY.getFullYear()}`} onClick={() => openModal(<YearGoalSheet close={closeModal} value={life.goal} done={life.books} onSave={v => update({ yearGoal: v })} />)} />
-        <PrefRow icon="bell" title="Notifications" sub={n.on ? `Daily nudge at ${fmt12(n.time)}` : 'Off'} onClick={() => openModal(<NotificationSheet close={closeModal} value={n} onSave={v => update({ notify: v })} />)} />
-        <PrefRow icon="calendar" title="Reading windows" sub={qt.on && qDays.length ? `Quiet ${fmt12(qt.from)} – ${fmt12(qt.to)} on ${qDays.length === 5 && !qt.days.Sat && !qt.days.Sun ? 'weekdays' : qDays.join(', ')}` : 'No quiet hours'} onClick={() => openModal(<ReadingWindowsSheet close={closeModal} value={qt} onSave={v => update({ quiet: v })} />)} />
-        <PrefRow icon="user" title="Account" sub={account.email || 'Name and email, kept on this phone'} onClick={() => editAccount()} />
+        <PrefRow icon="user" title="Account" sub={account.email || 'Name, photo and email, kept on this phone'} onClick={() => editAccount()} />
         <PrefRow icon="upload" title="Export data" sub="Save your reading history as a file" onClick={() => openModal(<ExportSheet close={closeModal} ctx={ctx} account={account} />)} last />
       </div>
 
       <SectionHead title="Storage" />
-      <div style={{ borderRadius: 'var(--card-radius)', background: 'var(--surface)', border: '1px solid var(--line)', overflow: 'hidden' }}>
-        <PrefRow icon="library" title="Books folder" sub={rescanned ? 'Checked for new PDFs' : Platform.folderLabel()} onClick={() => { Platform.rescan(); Lib.sync(); setRescanned(true); setTimeout(() => setRescanned(false), 2000); }} last />
+      <div style={{ borderRadius: 'var(--card-radius)', background: 'var(--surface)', border: '1px solid var(--line)', overflow: 'hidden', marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: folder.canShare ? '1px solid var(--line)' : 'none' }}>
+          <div style={{ width: 36, height: 36, borderRadius: 999, background: 'var(--fill)', color: 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginRight: 3 }}><Icon name="library" size={18} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15, color: 'var(--ink)' }}>Books folder</div>
+            <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rescanned ? `Checked · ${lib.length} book${lib.length === 1 ? '' : 's'}` : folder.shared ? 'Volapace (main storage)' : folder.path}</div>
+          </div>
+          {iconBtn('refresh', 'Look for new PDFs', () => { Platform.rescan(); Lib.sync(); setRescanned(true); setTimeout(() => setRescanned(false), 2200); })}
+          {iconBtn('arrowRight', 'Open folder', () => Platform.openFolder())}
+        </div>
+        {folder.canShare && <PrefRow icon="pages" title="Use a Volapace folder" sub="Keep books in main storage, easy to find over USB" onClick={() => Platform.requestFolderAccess()} last />}
       </div>
-      <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 10, lineHeight: 1.45, padding: '0 4px' }}>
-        Everything stays on this phone. Volapace has no account, no sync and no internet access.
+      <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)', margin: '0 4px 26px', lineHeight: 1.45 }}>
+        Everything stays on this phone. Volapace has no account and no sync.
+      </div>
+
+      <SectionHead title="About" />
+      <div style={{ borderRadius: 'var(--card-radius)', background: 'var(--surface)', border: '1px solid var(--line)', overflow: 'hidden' }}>
+        <PrefRow icon="refresh" title="Check for updates" sub={updSub} onClick={() => (upd && upd.newer ? Platform.openUrl(upd.url) : check())} last />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 22 }}>
+        <VolapaceLogo size={20} /><span style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)' }}>Volapace {Platform.appVersion()}</span>
       </div>
     </div>
+  );
+}
+
+function PhotoSheet({ close, account, setAccount }) {
+  const pick = async () => { const p = await Platform.pickImage(); if (p) setAccount({ ...account, photo: p }); close(); };
+  return (
+    <BottomSheet>
+      <SheetHeader icon="camera" title="Profile photo" sub="Shown on Home and in your profile" />
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0 20px' }}><Avatar account={account} size={96} /></div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        {account.photo && <Button variant="soft" style={{ flex: 1 }} onClick={() => { const a = { ...account }; delete a.photo; setAccount(a); close(); }}>Remove</Button>}
+        <Button icon="camera" style={{ flex: 2 }} onClick={pick}>{account.photo ? 'Choose another' : 'Choose a photo'}</Button>
+      </div>
+    </BottomSheet>
   );
 }
 
@@ -366,12 +415,12 @@ function SheetHeader({ icon, title, sub }) {
   );
 }
 
-function TimeField({ value, onChange }) {
+function TimeField({ value, onChange, compact }) {
   return (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 10, height: 50, padding: '0 14px', borderRadius: 14, background: 'var(--fill)', border: '1px solid var(--line)', cursor: 'pointer' }}>
-      <Icon name="clock" size={19} style={{ color: 'var(--ink-2)' }} />
+    <label style={{ display: 'flex', alignItems: 'center', gap: compact ? 6 : 10, height: 50, padding: compact ? '0 10px' : '0 14px', minWidth: 0, borderRadius: 14, background: 'var(--fill)', border: '1px solid var(--line)', cursor: 'pointer' }}>
+      {!compact && <Icon name="clock" size={19} style={{ color: 'var(--ink-2)' }} />}
       <input type="time" value={value} onChange={e => e.target.value && onChange(e.target.value)}
-        style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15.5, color: 'var(--ink)', colorScheme: 'light dark' }} />
+        style={{ flex: 1, minWidth: 0, width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15.5, color: 'var(--ink)', colorScheme: 'light dark' }} />
     </label>
   );
 }
@@ -445,14 +494,14 @@ function ReadingWindowsSheet({ close, value = DEFAULT_QUIET, onSave }) {
 function AccountSheet({ close, account, onSave }) {
   const [name, setName] = React.useState(account.name || '');
   const [email, setEmail] = React.useState(account.email || '');
-  const [since, setSince] = React.useState(account.since || '');
+  const [since, setSince] = React.useState(/^\d{4}-\d{2}-\d{2}$/.test(account.since || '') ? account.since : '');
   const validEmail = !email.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const ok = validEmail;
   const field = (label, value, set, props = {}) => (
     <label style={{ display: 'block', padding: '10px 14px', borderRadius: 14, background: 'var(--fill)', border: '1px solid var(--line)' }}>
       <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12, color: 'var(--ink-2)' }}>{label}</div>
       <input value={value} onChange={e => set(e.target.value)} {...props}
-        style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', padding: '3px 0 0', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 16, color: 'var(--ink)' }} />
+        style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', colorScheme: 'light dark', minHeight: 24, padding: '3px 0 0', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 16, color: 'var(--ink)' }} />
     </label>
   );
   return (
@@ -462,11 +511,11 @@ function AccountSheet({ close, account, onSave }) {
         {field('Display name', name, setName, { autoComplete: 'name', placeholder: 'Your name' })}
         {field('Email (optional)', email, setEmail, { type: 'email', autoComplete: 'email', placeholder: 'you@example.com' })}
         {!validEmail && <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--sage)', marginTop: -4, paddingLeft: 4 }}>Enter a valid email address</div>}
-        {field('Reading since', since, setSince, { placeholder: 'e.g. March 2026' })}
+        {field('Reading since', since, setSince, { type: 'date', max: dayISO(TODAY) })}
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
         <Button variant="soft" style={{ flex: 1 }} onClick={close}>Cancel</Button>
-        <Button style={{ flex: 2 }} disabled={!ok} onClick={() => { onSave({ name: name.trim(), email: email.trim(), since: since.trim() }); close(); }}>Save changes</Button>
+        <Button style={{ flex: 2 }} disabled={!ok} onClick={() => { onSave({ ...account, name: name.trim(), email: email.trim(), since: since || account.since || '' }); close(); }}>Save changes</Button>
       </div>
     </BottomSheet>
   );
@@ -573,6 +622,27 @@ function SheetToggleRow({ title, sub, on, onChange }) {
 }
 
 Object.assign(window, {
-  LibraryScreen, YouScreen, BottomSheet, VirtualRows, notifyOf, quietOf,
+  LibraryScreen, YouScreen, BottomSheet, VirtualRows, notifyOf, quietOf, Avatar, PhotoSheet, sinceLabel,
   ExportSheet, YearGoalSheet, NotificationSheet, ReadingWindowsSheet, AccountSheet,
 });
+
+// Every bookmark in every book, grouped by book
+function AllBookmarksSheet({ ctx, close, onOpen }) {
+  const books = Lib.list().map(e => ({ e, s: e.id === ctx.bookId ? ctx : (e.snap || {}) })).filter(x => (x.s.bookmarks || []).length);
+  return (
+    <BottomSheet>
+      <SheetHeader icon="bookmark" title="Bookmarks" sub="Saved pages across your books" />
+      <div style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {books.length === 0 && <div style={{ padding: 18, borderRadius: 16, background: 'var(--fill)', fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', textAlign: 'center' }}>No bookmarks yet. Tap the bookmark in the reader to save a page.</div>}
+        {books.map(({ e, s }) => (
+          <div key={e.id}>
+            <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)', margin: '0 4px 6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.title}</div>
+            <BookmarkList pages={s.bookmarks} highlights={s.highlights || []} chs={e.id === PdfStore.id ? PdfStore.chapters : []} onOpen={p => onOpen(e, p)} />
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 16 }}><Button full variant="soft" onClick={close}>Close</Button></div>
+    </BottomSheet>
+  );
+}
+Object.assign(window, { AllBookmarksSheet });

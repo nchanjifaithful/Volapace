@@ -90,17 +90,25 @@ function lifetimeStats(ctx) {
 }
 
 // Week / month / year figures for the Progress screen
+// Calendar periods: the week runs Monday to Sunday; the month is split into Week 1 (days 1–7), Week 2…
+const weekStart = (d = TODAY) => shiftDay(d, -((d.getDay() + 6) % 7));
 function rangeStats(ctx, range) {
-  const day = (i) => shiftDay(TODAY, -i);
   if (range === 'week') {
-    const bars = Array.from({ length: 7 }, (_, k) => { const d = day(6 - k); const x = sumDays(ctx, d, d); return { m: 'SMTWTFS'[d.getDay()], v: Math.round(x.s / 60), top: x.top }; });
-    const cur = sumDays(ctx, day(6), TODAY), prev = sumDays(ctx, day(13), day(7));
-    return { calTitle: 'This week', summary: { pages: cur.p, hours: hrs(cur.s), books: finishedBetween(ctx, day(6), TODAY) }, prev: prev.p, barsTitle: 'Minutes per day', unit: 'min', bars };
+    const mon = weekStart();
+    const bars = Array.from({ length: 7 }, (_, k) => { const d = shiftDay(mon, k); if (d > TODAY) return { m: 'MTWTFSS'[k], v: 0, top: null, future: true }; const x = sumDays(ctx, d, d); return { m: 'MTWTFSS'[k], v: Math.round(x.s / 60), top: x.top }; });
+    const cur = sumDays(ctx, mon, TODAY), prev = sumDays(ctx, shiftDay(mon, -7), shiftDay(mon, -1));
+    return { calTitle: 'This week', summary: { pages: cur.p, hours: hrs(cur.s), books: finishedBetween(ctx, mon, TODAY) }, prev: prev.p, barsTitle: 'Minutes per day', unit: 'min', bars, prevLabel: 'last week' };
   }
   if (range === 'month') {
-    const bars = Array.from({ length: 4 }, (_, k) => { const x = sumDays(ctx, day(27 - k * 7), day(21 - k * 7)); return { m: `Wk ${k + 1}`, v: hrs(x.s), top: x.top }; });
-    const cur = sumDays(ctx, day(27), TODAY), prev = sumDays(ctx, day(55), day(28));
-    return { calTitle: 'Last 28 days', summary: { pages: cur.p, hours: hrs(cur.s), books: finishedBetween(ctx, day(27), TODAY) }, prev: prev.p, barsTitle: 'Hours per week', unit: 'hrs', bars };
+    const y = TODAY.getFullYear(), mo = TODAY.getMonth(), first = new Date(y, mo, 1), last = new Date(y, mo + 1, 0).getDate();
+    const nW = Math.ceil(last / 7);
+    const bars = Array.from({ length: nW }, (_, k) => {
+      const a = new Date(y, mo, 1 + k * 7), b = new Date(y, mo, Math.min(last, 7 + k * 7));
+      if (a > TODAY) return { m: `Wk ${k + 1}`, v: 0, top: null, future: true };
+      const x = sumDays(ctx, a, b < TODAY ? b : TODAY); return { m: `Wk ${k + 1}`, v: hrs(x.s), top: x.top };
+    });
+    const cur = sumDays(ctx, first, TODAY), prev = sumDays(ctx, new Date(y, mo - 1, 1), new Date(y, mo, 0));
+    return { calTitle: first.toLocaleDateString(undefined, { month: 'long' }), summary: { pages: cur.p, hours: hrs(cur.s), books: finishedBetween(ctx, first, TODAY) }, prev: prev.p, barsTitle: 'Hours per week', unit: 'hrs', bars, prevLabel: 'last month' };
   }
   const y = TODAY.getFullYear();
   const bars = MONTH_ABBR.map((m, i) => {
@@ -139,4 +147,4 @@ function readingPace(ctx) {
   return { pph: s >= 600 && p > 0 ? Math.round(p / (s / 3600)) : null, session: n ? Math.round(s / n / 60) : null };
 }
 
-Object.assign(window, { applyHistory, lifetimeStats, rangeStats, monthsMet, todayMinutes, readingPace, longestStreak, MONTH_ABBR });
+Object.assign(window, { weekStart, applyHistory, lifetimeStats, rangeStats, monthsMet, todayMinutes, readingPace, longestStreak, MONTH_ABBR });

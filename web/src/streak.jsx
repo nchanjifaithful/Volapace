@@ -19,9 +19,9 @@ function StreakCardView({ ctx, theme }) {
   const pct = Math.round((c.page / c.total) * 100);
   const dot = t.accent || t.fg;
   return (
-    <div data-om-raster="true" style={{ width: 320, height: 400, borderRadius: 22, background: t.bg, color: t.fg, padding: 22, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-ui)', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontFamily: 'var(--font-brand)', fontWeight: 800, fontSize: 17, letterSpacing: -0.6 }}>Volapace</span>
+    <div data-om-raster="true" style={{ width: 320, height: 400, borderRadius: 22, background: t.bg, color: t.fg, padding: '22px 22px 34px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-ui)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Brand logo={22} size={17} color={t.fg} variant={theme === 'paper' ? 'color' : 'white'} bookmark={t.bg} />
         <span style={{ fontSize: 11, color: t.sub }}>{TODAY.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
       </div>
       <div style={{ marginTop: 18, display: 'flex', alignItems: 'flex-end', gap: 8 }}>
@@ -74,8 +74,8 @@ async function coverCanvas(book, w, h) {
     await page.render({ canvasContext: g, viewport: vp }).promise;
     return c;
   }
-  const cv = book.cover, gr = g.createLinearGradient(0, 0, w * 0.6, h);
-  gr.addColorStop(0, cv.bg[0]); gr.addColorStop(1, cv.bg[1]); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  const cv = book.cover || coverStyleFor(book.title, book.paper);
+  g.fillStyle = cv.bg[0]; g.fillRect(0, 0, w, h);
   g.fillStyle = cv.accent; g.fillRect(w * 0.1, h * 0.1, w * 0.18, 4);
   g.fillStyle = cv.ink; g.font = `600 ${w * 0.15}px Newsreader, Georgia, serif`; g.textBaseline = 'top';
   wrapText(g, book.title, w * 0.1, h * 0.16, w * 0.8, w * 0.17, 4);
@@ -103,7 +103,12 @@ async function drawStreakCard(ctx, theme) {
   const UI = 'Geist, -apple-system, system-ui, sans-serif', dot = t.accent || t.fg;
   g.fillStyle = t.bg; g.fillRect(0, 0, W, H);
   g.textBaseline = 'alphabetic';
-  g.fillStyle = t.fg; g.font = `800 ${17 * K}px "Bricolage Grotesque", Geist, sans-serif`; if ('letterSpacing' in g) g.letterSpacing = `${-0.6 * K}px`; g.fillText('Volapace', P, P + 16 * K); if ('letterSpacing' in g) g.letterSpacing = '0px';
+  // logo + wordmark
+  const lw = 22 * K, lh = lw * 788 / 890, white = theme !== 'paper';
+  g.save(); g.translate(P, P + 16 * K - lh + 2 * K); g.scale(lw / 890, lw / 890); g.translate(-128, -86);
+  [['page3', white ? 'rgba(255,255,255,0.45)' : LOGO_FLAT.page3], ['page2', white ? 'rgba(255,255,255,0.72)' : LOGO_FLAT.page2], ['book', white ? '#fff' : LOGO_FLAT.book], ['mark', white ? t.bg : LOGO_FLAT.mark]].forEach(([k, c]) => { g.fillStyle = c; g.fill(new Path2D(LOGO_PATHS[k])); });
+  g.restore();
+  g.fillStyle = t.fg; g.font = `800 ${17 * K}px "Bricolage Grotesque", Geist, sans-serif`; if ('letterSpacing' in g) g.letterSpacing = `${-0.6 * K}px`; g.fillText('Volapace', P + lw + 5 * K, P + 16 * K); if ('letterSpacing' in g) g.letterSpacing = '0px';
   g.fillStyle = t.sub; g.font = `${11 * K}px ${UI}`; g.textAlign = 'right';
   g.fillText(TODAY.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }), W - P, P + 16 * K); g.textAlign = 'left';
   // streak number
@@ -121,7 +126,7 @@ async function drawStreakCard(ctx, theme) {
     g.fillStyle = t.sub; g.font = `${10 * K}px ${UI}`; g.textAlign = 'center'; g.fillText(d.l, cx, wy + 28 * K); g.textAlign = 'left';
   });
   // stats row (bottom)
-  const sy = H - P;
+  const sy = H - P - 16 * K; // extra room at the bottom
   [[s.books, 'books'], [s.pages.toLocaleString(), 'pages'], [s.hours, 'hours']].forEach(([n, l], i) => {
     const x = P + i * ((W - 2 * P) / 3);
     g.fillStyle = t.fg; g.font = `600 ${20 * K}px ${UI}`; g.fillText(String(n), x, sy - 16 * K);
@@ -171,13 +176,14 @@ function StreakScreen({ ctx, onBack }) {
   };
 
   return (
-    <div style={{ minHeight: '100%', padding: 'calc(var(--sat) + 8px) 22px calc(var(--sab) + 40px)', boxSizing: 'border-box', position: 'relative' }}>
+    <div style={{ minHeight: '100%', padding: 'calc(var(--sat) + 8px) 22px calc(var(--sab) + 20px)', boxSizing: 'border-box', position: 'relative', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
         <IconBtn name="arrowLeft" size={40} onClick={onBack} />
         <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' }}>Your streak</span>
         <div style={{ width: 40 }} />
       </div>
 
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', paddingBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
         <div key={theme} style={{ animation: 'pop .3s cubic-bezier(.2,1.1,.4,1)', boxShadow: 'var(--shadow-float)', borderRadius: 22 }}>
           <StreakCardView ctx={ctx} theme={theme} />
@@ -190,10 +196,6 @@ function StreakScreen({ ctx, onBack }) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 22 }}>
-        <Button variant="soft" icon="upload" style={{ flex: 1 }} onClick={save} disabled={!!busy}>{busy === 'save' ? 'Saving\u2026' : 'Save image'}</Button>
-        <Button icon="share" style={{ flex: 1 }} onClick={share} disabled={!!busy}>{busy === 'share' ? 'Preparing\u2026' : 'Share'}</Button>
-      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div style={{ padding: 14, borderRadius: 16, background: 'var(--fill)' }}>
@@ -206,7 +208,15 @@ function StreakScreen({ ctx, onBack }) {
         </div>
       </div>
 
-      {note && <div style={{ position: 'absolute', left: '50%', bottom: 46, transform: 'translateX(-50%)', padding: '10px 16px', borderRadius: 999, background: 'var(--ink)', color: 'var(--cream)', fontFamily: 'var(--font-ui)', fontSize: 13.5, fontWeight: 500, whiteSpace: 'nowrap', animation: 'fadeUp .25s' }}>{note}</div>}
+      </div>
+
+      {/* actions within thumb reach */}
+      <div style={{ display: 'flex', gap: 10, marginTop: 'auto', paddingTop: 12 }}>
+        <Button variant="soft" icon="upload" style={{ flex: 1 }} onClick={save} disabled={!!busy}>{busy === 'save' ? 'Saving\u2026' : 'Save image'}</Button>
+        <Button icon="share" style={{ flex: 1 }} onClick={share} disabled={!!busy}>{busy === 'share' ? 'Preparing\u2026' : 'Share'}</Button>
+      </div>
+
+      {note && <div style={{ position: 'absolute', left: '50%', bottom: 'calc(var(--sab) + 84px)', transform: 'translateX(-50%)', padding: '10px 16px', borderRadius: 999, background: 'var(--ink)', color: 'var(--cream)', fontFamily: 'var(--font-ui)', fontSize: 13.5, fontWeight: 500, whiteSpace: 'nowrap', animation: 'fadeUp .25s' }}>{note}</div>}
     </div>
   );
 }

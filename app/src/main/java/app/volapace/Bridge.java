@@ -92,5 +92,19 @@ final class Bridge {
         });
     }
 
+    @JavascriptInterface public void setSelectionTools(boolean on) { act.web.selectionTools = on; }
+    @JavascriptInterface public void pickImage(String cb) { act.runOnUiThread(() -> act.pickImage(cb)); }
+    @JavascriptInterface public String folderInfo() {
+        try {
+            return new org.json.JSONObject().put("path", act.library.folderLabel()).put("rel", act.library.relativePath())
+                    .put("shared", act.library.isShared()).put("canShare", !act.library.isShared()).toString();
+        } catch (Exception e) { return "{}"; }
+    }
+    @JavascriptInterface public void requestFolderAccess() { act.runOnUiThread(act::requestFolderAccess); }
+    @JavascriptInterface public void openFolder() { act.runOnUiThread(act::openFolder); }
+    @JavascriptInterface public String appVersion() { return act.appVersion(); }
+    @JavascriptInterface public void checkUpdate(String cb) { act.checkUpdate(cb); }
+    @JavascriptInterface public void openUrl(String url) { act.runOnUiThread(() -> act.openUrl(url)); }
+
     @JavascriptInterface public void toast(String msg) { act.runOnUiThread(() -> Toast.makeText(act, msg, Toast.LENGTH_SHORT).show()); }
 }
