@@ -1,0 +1,97 @@
+name: Build APK
+
+# Builds Volapace on GitHub's servers (no local Android SDK or Node needed).
+# Every push to main produces a signed APK as a build artifact.
+# Pushing a tag such as v1.0 also publishes that APK to Releases, with the
+# newest section of CHANGELOG.md as the release notes.
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create a Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the UI (React, pdf.js and fonts bundled into the APK)
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
+
+      - name: Load the permanent signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.VOLAPACE_KEYSTORE_BASE64 }}
+        run: |
+          # Fail instead of signing with a throwaway key, which would break updates.
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::The VOLAPACE_KEYSTORE_BASE64 secret is missing. Run setup-signing.sh once."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/volapace.p12"
+          echo "VOLAPACE_KEYSTORE=$RUNNER_TEMP/volapace.p12" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        env:
+          VOLAPACE_KEYSTORE_PASSWORD: ${{ secrets.VOLAPACE_KEYSTORE_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Name the APK and show its signature
+        run: |
+          version=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          cp app/build/outputs/apk/release/app-release.apk "Volapace-v$version.apk"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs "Volapace-v$version.apk" | grep -E 'DN|SHA-256'
+          ls -l "Volapace-v$version.apk"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Volapace-apk
+          path: Volapace-v*.apk
+
+      - name: Write release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          {
+            awk '/^## /{ if (found) exit; found=1; next } found' CHANGELOG.md
+            echo
+            echo "---"
+            echo "Download **Volapace-v$VERSION.apk** below and open it on your phone to install (you may need to allow installs from your browser or file manager)."
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish APK to Releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Volapace ${{ env.VERSION }}
+          files: Volapace-v*.apk
+          body_path: release-notes.md

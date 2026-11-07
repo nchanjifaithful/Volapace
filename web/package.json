@@ -1,0 +1,15 @@
+{
+  "name": "volapace-web",
+  "private": true,
+  "description": "Volapace UI, compiled into the Android app's assets (app/src/main/assets/www).",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": {
+    "@fontsource/bricolage-grotesque": "5.3.0",
+    "@fontsource/geist-sans": "5.3.0",
+    "@fontsource/newsreader": "5.3.0",
+    "esbuild": "0.24.2",
+    "pdfjs-dist": "3.11.174",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}

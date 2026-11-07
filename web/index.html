@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Volapace</title>
+<link rel="stylesheet" href="fonts.css" />
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+:root{--sat:0px;--sab:0px}
+body{background:#fff;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-user-select:none;user-select:none}
+input,textarea{-webkit-user-select:text;user-select:text}
+#root{height:100%}
+a{color:var(--sage)}
+.vp-root{--font-ui:"Geist",system-ui,sans-serif;--font-serif:"Newsreader",Georgia,serif;--font-brand:"Bricolage Grotesque","Geist",system-ui,sans-serif;
+--cream:#FFFFFF;--surface:#FFFFFF;--fill:#F4F4F4;--fill-2:#EBEBEB;--ink:#141414;--ink-2:#6B6B6B;--ink-3:#A3A3A3;--sage:#D90429;
+--line:rgba(0,0,0,0.075);--track-off:#EDEDED;--dash:#DADADA;--shadow-card:none;--shadow-float:0 10px 30px rgba(0,0,0,0.12);
+--glass:rgba(255,255,255,0.8);--upload-veil:rgba(255,255,255,0.72);--tabbar:rgba(255,255,255,0.94);
+--amber:#B7791F;--amber-soft:color-mix(in srgb,#B7791F 10%,var(--surface));--amber-ring:color-mix(in srgb,#B7791F 30%,transparent);
+--sage-deep:color-mix(in srgb,var(--sage),#000 22%);--sage-soft:color-mix(in srgb,var(--sage) 8%,var(--surface));
+--st-reading:var(--sage);--st-finished:#17803D;--st-paused:#9A5B00;--st-saved:#2F5FD0;
+--sage-ring:color-mix(in srgb,var(--sage) 26%,transparent);--sage-glow:transparent;--card-radius:20px}
+.vp-root[data-theme="dark"]{--st-finished:#2E9E57;--st-paused:#B87412;--st-saved:#4A7BE6;--cream:#000000;--surface:#121212;--fill:#1C1C1C;--fill-2:#262626;--ink:#F2F2F2;--ink-2:#9C9C9C;--ink-3:#646464;
+--line:rgba(255,255,255,0.08);--track-off:#2A2A2A;--dash:rgba(255,255,255,0.18);--shadow-float:0 10px 30px rgba(0,0,0,0.6);
+--glass:rgba(18,18,18,0.8);--upload-veil:rgba(0,0,0,0.6);--tabbar:rgba(0,0,0,0.94);--sage-deep:color-mix(in srgb,var(--sage),#fff 35%);
+--sage-soft:color-mix(in srgb,var(--sage) 18%,var(--surface))}
+@keyframes screenIn { from { transform: translateX(16px); } to { transform: none; } }
+@keyframes screenOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes fadeUp { from { transform: translateY(10px); } to { transform: none; } }
+@keyframes pop { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes grow { from { transform: scaleY(0.4); } to { transform: scaleY(1); } }
+@keyframes laser { 0% { top: 5%; } 50% { top: 92%; } 100% { top: 5%; } }
+@keyframes barRise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes veilIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pgInNext { from { transform: translateX(36px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pgInPrev { from { transform: translateX(-36px); opacity: 0; } to { transform: none; opacity: 1; } }
+.textLayer{position:absolute;inset:0;overflow:hidden;line-height:1;text-size-adjust:none;-webkit-text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;z-index:2;-webkit-user-select:text;user-select:text}
+.textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0% 0%}
+.textLayer .endOfContent{display:block;position:absolute;inset:100% 0 0;z-index:-1;cursor:default;user-select:none}
+.textLayer ::selection,.vp-page ::selection{background:rgba(217,4,41,0.22)}
+.spin { animation: spin .8s linear infinite; }
+.laser { animation: laser 1.7s cubic-bezier(.45, 0, .55, 1) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  .laser, .spin { animation: none; }
+}
+.vol-slider { -webkit-appearance: none; appearance: none; background: transparent; height: 30px; cursor: pointer; }
+.vol-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; border-radius: 999px; background: #fff; border: none; box-shadow: 0 2px 8px rgba(0,0,0,.2), 0 0 0 1px var(--line); margin-top: 0; }
+.vol-slider::-webkit-slider-runnable-track { background: transparent; height: 30px; }
+::-webkit-scrollbar { width: 0; height: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="vendor/react.js"></script>
+<script src="vendor/react-dom.js"></script>
+<script src="vendor/pdf.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
