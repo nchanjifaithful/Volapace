@@ -27,7 +27,8 @@ function applyHistory(prev, data) {
     if (delta > 0) { day.s += delta; day.b[title] = (day.b[title] || 0) + delta; day.k[bid] = (day.k[bid] || 0) + delta; touched = true; }
   }
   // a finished reading session (seconds)
-  if (data.endSession != null) { if (data.endSession >= 30) { day.n += 1; touched = true; } delete next.endSession; }
+  // (endSession is the session's active time: the reader timer stops after 2 idle minutes)
+  if (data.endSession != null) { if (data.endSession >= 30) { day.n += 1; day.ss = (day.ss || 0) + data.endSession; touched = true; } delete next.endSession; }
   // Pages read: a PDF page counts once, the first time it's ticked as read (double-tap, the dot, or
   // finishing the day). Paper books count the pages logged by hand.
   let fresh = 0;
@@ -150,10 +151,16 @@ function todayMinutes(ctx) {
 }
 
 // Pages per hour and average session length, from reader sessions
+// Endurance = average length of a reading session: the summed length of counted sessions (30 s or
+// more) divided by how many there were. Time from shorter or unfinished sessions isn't mixed in.
+// Days logged before session lengths were stored fall back to that day's reading time.
 function readingPace(ctx) {
-  let s = 0, p = 0, n = 0;
-  Object.values(ctx.log || {}).forEach(x => { if (x.s > 0) { s += x.s; p += x.p || 0; } n += x.n || 0; });
-  return { pph: s >= 600 && p > 0 ? Math.round(p / (s / 3600)) : null, session: n ? Math.round(s / n / 60) : null };
+  let s = 0, p = 0, n = 0, ss = 0;
+  Object.values(ctx.log || {}).forEach(x => {
+    if (x.s > 0) { s += x.s; p += x.p || 0; }
+    if (x.n) { n += x.n; ss += x.ss != null ? x.ss : (x.s || 0); }
+  });
+  return { pph: s >= 600 && p > 0 ? Math.round(p / (s / 3600)) : null, session: n ? Math.max(1, Math.round(ss / n / 60)) : null };
 }
 
 // Seconds spent in one book's reader today (for time-based daily goals)

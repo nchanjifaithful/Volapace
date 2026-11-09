@@ -335,10 +335,14 @@ function StreakWeek({ ctx, compact, style = {} }) {
                 background: done ? 'var(--sage)' : 'var(--fill)', color: '#fff',
                 border: isToday && !done ? '1.5px dashed var(--ink-3)' : '1.5px solid transparent',
                 animation: isToday && done ? 'pop .4s cubic-bezier(.2,1.4,.4,1)' : 'none' }}>
-                {done && read.length === 0 && <Icon name="check" size={17} stroke={2.6} />}
-                {read.length > 0 && <MiniCover entry={read[0]} size={36} ring="var(--sage)" style={{ position: 'absolute', inset: -1.5 }} />}
-                {read.length > 1 && <MiniCover entry={read[1]} size={20} ring="var(--cream)" style={{ position: 'absolute', right: -6, bottom: -4 }} />}
-                {read.length > 2 && <span style={{ position: 'absolute', left: -6, bottom: -4, height: 16, minWidth: 16, padding: '0 3px', boxSizing: 'border-box', borderRadius: 999, background: 'var(--ink)', color: 'var(--cream)', border: '1.5px solid var(--cream)', fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+{read.length - 2}</span>}
+                {done && <Icon name="check" size={17} stroke={2.6} />}
+                {/* more than one book read that day: their covers, stacked on the corner */}
+                {read.length > 1 && (
+                  <div style={{ position: 'absolute', left: 22, top: 22, display: 'flex' }}>
+                    {read.slice(0, 2).map((e, k) => <MiniCover key={e.id} entry={e} size={19} style={{ marginLeft: k ? -9 : 0, boxShadow: '0 0 0 1.5px var(--cream), 0 0 0 2.5px var(--ink-3)' }} />)}
+                    {read.length > 2 && <span style={{ marginLeft: -6, height: 17, minWidth: 17, padding: '0 3px', boxSizing: 'border-box', borderRadius: 999, background: 'var(--ink)', color: 'var(--cream)', boxShadow: '0 0 0 1.5px var(--cream)', fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+{read.length - 2}</span>}
+                  </div>
+                )}
               </div>
               <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11.5, fontWeight: isToday ? 600 : 400, color: isToday ? 'var(--ink)' : 'var(--ink-3)' }}>{L[d.getDay()]}</span>
             </div>
@@ -442,7 +446,7 @@ function ProgressCard({ book, page, total, onClick, style = {} }) {
   page = Math.max(0, Math.min(total, page));
   const pct = Math.min(100, Math.round((page / Math.max(1, total)) * 100));
   return (
-    <button onClick={onClick} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: 12, borderRadius: 18, border: '1px solid var(--line)', background: 'var(--surface)', cursor: 'pointer', textAlign: 'left', width: '100%', ...style }}>
+    <button onClick={onClick} style={{ display: 'flex', gap: 14, alignItems: 'center', padding: 12, borderRadius: 20, border: '1px solid var(--line)', background: 'var(--surface)', cursor: 'pointer', textAlign: 'left', width: '100%', ...style }}>
       <BookCover book={book} w={56} radius={7} style={{ boxShadow: 'none' }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 16, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: -0.2 }}>{book.title}</div>

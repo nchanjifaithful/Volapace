@@ -28,7 +28,7 @@ const INTRO = [
 ];
 
 function IntroArt({ k }) {
-  const card = { background: 'var(--surface)', borderRadius: 18, border: '1px solid var(--line)' };
+  const card = { background: 'var(--surface)', borderRadius: 20, border: '1px solid var(--line)' };
   if (k === 'plan') return <div style={{ animation: 'floaty 4s ease-in-out infinite' }}><VolapaceLogo size={150} /></div>;
   if (k === 'pace') return (
     <div style={{ width: 260, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -100,7 +100,7 @@ function HelloScreen({ account = {}, onDone, onBack }) {
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="given-name" autoCapitalize="words" onKeyDown={e => e.key === 'Enter' && e.target.blur()}
           style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', padding: '3px 0 0', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 17, color: 'var(--ink)' }} />
       </label>
-      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)', margin: '0 4px 8px', textTransform: 'uppercase', letterSpacing: 0.6 }}>What kind of reader are you?</div>
+      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 15, color: 'var(--ink)', margin: '0 4px 10px', letterSpacing: -0.2 }}>What kind of reader are you?</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 22 }}>
         {READER_TYPES.map(t => {
           const on = type === t.k;
@@ -182,7 +182,7 @@ function ScreenTop({ back, step, title, sub, right }) {
 function Group({ title, children, style = {} }) {
   return (
     <div style={{ marginBottom: 18, ...style }}>
-      {title && <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)', margin: '0 4px 8px', textTransform: 'uppercase', letterSpacing: 0.6 }}>{title}</div>}
+      {title && <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 15, color: 'var(--ink)', margin: '0 4px 10px', letterSpacing: -0.2 }}>{title}</div>}
       <div style={{ borderRadius: 'var(--card-radius)', border: '1px solid var(--line)', background: 'var(--surface)', overflow: 'hidden' }}>{children}</div>
     </div>
   );
@@ -241,7 +241,7 @@ function RemindersScreen({ ctx, update, go, back, onboarding }) {
             <div style={{ display: 'flex', gap: 6 }}>
               {Object.keys(q.days).map(d => {
                 const sel = q.days[d];
-                return <button key={d} onClick={() => setQ({ days: { ...q.days, [d]: !sel } })} style={{ flex: 1, height: 40, cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 12.5, border: `1px solid ${sel ? 'var(--ink)' : 'var(--line)'}`, borderRadius: 999, background: sel ? 'var(--ink)' : 'var(--fill)', color: sel ? 'var(--cream)' : 'var(--ink-3)' }}>{d[0]}</button>;
+                return <button key={d} onClick={() => setQ({ days: { ...q.days, [d]: !sel } })} style={{ flex: 1, height: 40, cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 12.5, border: `1px solid ${sel ? 'var(--ink)' : 'var(--line)'}`, borderRadius: 999, background: sel ? 'var(--ink)' : 'var(--fill)', color: sel ? 'var(--cream)' : 'var(--ink-3)' }}>{d[0]}</button>;
               })}
             </div>
             <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 10 }}>Reminders that land in quiet hours wait until they end.</div>
@@ -298,7 +298,7 @@ function SummaryScreen({ ctx, update, go, back }) {
         <BookCover book={cur.book} w={70} radius={8} style={{ boxShadow: 'none' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, opacity: 0.85 }}>{ctx.mode || 'Custom'} pace &middot; {ctx.hasPdf ? 'PDF' : 'Paper book'}</div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 20, letterSpacing: -0.4, lineHeight: 1.15, marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{plan.title}</div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 20, letterSpacing: -0.4, lineHeight: 1.15, marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{plan.title}</div>
           {ctx.author && <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13, opacity: 0.85, marginTop: 2 }}>{ctx.author}</div>}
         </div>
       </div>
@@ -317,11 +317,11 @@ function SummaryScreen({ ctx, update, go, back }) {
         {line('bell', 'Daily reminder', n.on ? fmt12(n.time) : 'Off', true)}
       </Group>
 
-      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)', margin: '6px 4px 8px', textTransform: 'uppercase', letterSpacing: 0.6 }}>Your first week</div>
+      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 15, color: 'var(--ink)', margin: '6px 4px 10px', letterSpacing: -0.2 }}>Your first week</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 22 }}>
         {sched.slice(0, 7).map((d, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 14, background: i === 0 ? 'var(--sage-soft)' : 'var(--fill)', border: i === 0 ? '1px solid var(--sage-ring)' : '1px solid transparent' }}>
-            <span style={{ width: 52, fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 13, color: i === 0 ? 'var(--sage-deep)' : 'var(--ink)' }}>{i === 0 ? 'Today' : `${WDAYS[dayDate(i).getDay()]} ${dayDate(i).getDate()}`}</span>
+            <span style={{ width: 52, fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: i === 0 ? 'var(--sage-deep)' : 'var(--ink)' }}>{i === 0 ? 'Today' : `${WDAYS[dayDate(i).getDay()]} ${dayDate(i).getDate()}`}</span>
             <span style={{ flex: 1, fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)' }}>Day {i + 1} &middot; p. {d.from}&ndash;{d.to}</span>
             <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>{d.count} page{d.count === 1 ? '' : 's'}</span>
           </div>

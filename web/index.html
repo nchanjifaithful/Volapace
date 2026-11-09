@@ -19,9 +19,10 @@ a{color:var(--sage)}
 --glass:rgba(255,255,255,0.8);--upload-veil:rgba(255,255,255,0.72);--tabbar:rgba(255,255,255,0.94);
 --amber:#B7791F;--amber-soft:color-mix(in srgb,#B7791F 10%,var(--surface));--amber-ring:color-mix(in srgb,#B7791F 30%,transparent);
 --sage-deep:color-mix(in srgb,var(--sage),#000 22%);--sage-soft:color-mix(in srgb,var(--sage) 8%,var(--surface));
---st-reading:var(--sage);--st-finished:#17803D;--st-paused:#9A5B00;--st-saved:#2F5FD0;
+--ok:#1E8E4E;--ok-soft:color-mix(in srgb,var(--ok) 11%,var(--surface));--ok-ring:color-mix(in srgb,var(--ok) 28%,transparent);
+--st-reading:var(--sage);--st-finished:var(--ok);--st-paused:#9A5B00;--st-saved:#2F5FD0;
 --sage-ring:color-mix(in srgb,var(--sage) 26%,transparent);--sage-glow:transparent;--card-radius:20px}
-.vp-root[data-theme="dark"]{--st-finished:#2E9E57;--st-paused:#B87412;--st-saved:#4A7BE6;--cream:#000000;--surface:#121212;--fill:#1C1C1C;--fill-2:#262626;--ink:#F2F2F2;--ink-2:#9C9C9C;--ink-3:#646464;
+.vp-root[data-theme="dark"]{--ok:#34B36A;--st-paused:#B87412;--st-saved:#4A7BE6;--cream:#000000;--surface:#121212;--fill:#1C1C1C;--fill-2:#262626;--ink:#F2F2F2;--ink-2:#9C9C9C;--ink-3:#646464;
 --line:rgba(255,255,255,0.08);--track-off:#2A2A2A;--dash:rgba(255,255,255,0.18);--shadow-float:0 10px 30px rgba(0,0,0,0.6);
 --glass:rgba(18,18,18,0.8);--upload-veil:rgba(0,0,0,0.6);--tabbar:rgba(0,0,0,0.94);--sage-deep:color-mix(in srgb,var(--sage),#fff 35%);
 --sage-soft:color-mix(in srgb,var(--sage) 18%,var(--surface))}
@@ -53,6 +54,9 @@ a{color:var(--sage)}
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
   .laser, .spin { animation: none; }
 }
+/* every tap gets the same small press: buttons shrink a touch */
+button{transition:transform .12s cubic-bezier(.2,.8,.2,1),opacity .12s,background-color .15s,color .15s}
+button:not(:disabled):active{transform:scale(.97)!important}
 .vol-slider { -webkit-appearance: none; appearance: none; background: transparent; height: 30px; cursor: pointer; }
 .vol-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; border-radius: 999px; background: #fff; border: none; box-shadow: 0 2px 8px rgba(0,0,0,.2), 0 0 0 1px var(--line); margin-top: 0; }
 .vol-slider::-webkit-slider-runnable-track { background: transparent; height: 30px; }

@@ -8,7 +8,7 @@ const ZMIN = 0.5, ZMAX = 4, PAGE_GAP = 12, SAMPLE_ASPECT = 1.45;
 const HL_KEYS = ['yellow', 'green', 'blue', 'pink'];
 const HL_COLORS = { yellow: 'rgba(255,214,0,0.45)', green: 'rgba(52,199,89,0.32)', blue: 'rgba(10,132,255,0.24)', pink: 'rgba(255,45,135,0.24)', red: 'rgba(255,45,135,0.24)' };
 const HL_SWATCH = { yellow: '#FFD600', green: '#34C759', blue: '#0A84FF', pink: '#FF2D87', red: '#FF2D87' };
-const READ_GREEN = '#2E9E57';
+const READ_GREEN = 'var(--ok)'; // the app's one 'done' colour (light/dark aware)
 
 // ── Sheets ──────────────────────────────────────────────────
 function ReaderSheet({ title, onClose, children, right }) {
@@ -18,7 +18,7 @@ function ReaderSheet({ title, onClose, children, right }) {
       <div style={{ position: 'relative', width: '100%', maxHeight: '80%', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: '28px 28px 0 0', padding: '10px 20px 34px', boxSizing: 'border-box', paddingBottom: 'calc(var(--sab) + 24px)', animation: 'sheetUp .3s cubic-bezier(.2,.8,.2,1)' }}>
         <div style={{ width: 38, height: 5, borderRadius: 999, background: 'var(--dash)', margin: '0 auto 14px' }} />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <span style={{ fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: 22, color: 'var(--ink)', letterSpacing: -0.4 }}>{title}</span>
+          <span style={{ fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: 21, color: 'var(--ink)', letterSpacing: -0.4 }}>{title}</span>
           {right || <IconBtn name="close" size={36} onClick={onClose} />}
         </div>
         {children}
@@ -512,8 +512,11 @@ function ReaderScreen({ ctx, update, onBack, hostRef }) {
   React.useEffect(() => () => update({ timeLog: { date: today, secs: secsRef.current }, endSession: secsRef.current - startSecs.current }), []);
   const poke = () => { lastAct.current = Date.now(); };
 
-  function complete() {
-    update(markTodayDone(ctxRef.current));
+  const [doneInfo, setDoneInfo] = React.useState(null); // { day, ahead } for the celebration sheet
+  function complete(ahead) {
+    const c = ctxRef.current;
+    setDoneInfo({ day: (c.doneDays || 0) + 1, ahead: !!ahead });
+    update(markTodayDone(c));
     setSheet('done');
     Platform.vibrate([14, 60, 30]);
     if (hostRef && hostRef.current) fireConfetti(hostRef.current);
@@ -526,10 +529,13 @@ function ReaderScreen({ ctx, update, onBack, hostRef }) {
     const s = readSet(c); const add = !s.has(n);
     add ? s.add(n) : s.delete(n);
     update({ readPages: [...s].sort((a, b) => a - b) });
-    const d = cur, done = todayIsDone(c);
-    if (add && d && plan.goalType !== 'time' && !done && n >= d.from && n <= d.to) {
+    // the day being read: today's, or the next one when reading ahead. Finishing it completes it
+    // (and celebrates) either way; reading ahead just moves the plan forward early.
+    const di = c.doneDays || 0;
+    const d = hasPlan(c) && di < (c.days || 0) ? planSchedule(c)[di] : null;
+    if (add && d && plan.goalType !== 'time' && n >= d.from && n <= d.to) {
       const left = readingList(c).filter(p => p >= d.from && p <= d.to && !s.has(p));
-      if (left.length === 0) setTimeout(complete, 250);
+      if (left.length === 0) { const ahead = todayIsDone(c); setTimeout(() => complete(ahead), 250); }
     }
     return add;
   };
@@ -736,7 +742,7 @@ function ReaderScreen({ ctx, update, onBack, hostRef }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
           <div style={{ flex: 1 }}><ProgressBar value={plan.finished && planned ? 100 : pct} height={4} fill={!planned ? 'var(--ink)' : 'var(--sage)'} /></div>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, color: todayDone && planned ? 'var(--sage)' : 'var(--ink)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, color: todayDone && planned ? 'var(--ok)' : 'var(--ink)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
             {todayDone && planned && !plan.finished && <Icon name="check" size={13} stroke={2.6} />}{headStatus}
           </span>
         </div>
@@ -832,8 +838,8 @@ function ReaderScreen({ ctx, update, onBack, hostRef }) {
         onSave={(note, color) => { const hs = ctxRef.current.highlights || []; update({ highlights: hs.some(h => h.id === editHl.id) ? hs.map(h => h.id === editHl.id ? { ...h, note, color } : h) : [...hs, { ...editHl, note, color }] }); setEditHl(null); }}
         onDelete={() => { update({ highlights: (ctxRef.current.highlights || []).filter(h => h.id !== editHl.id) }); setEditHl(null); }} />}
       {sheet === 'done' && (
-        <ReaderSheet title={'Today’s reading is done'} onClose={() => setSheet(null)} right={<span />}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', margin: '-6px 0 20px', lineHeight: 1.4 }}>Day {Math.max(1, plan.doneDays)} of {plan.days} complete{plan.doneDays < plan.days && cur ? ` · Day ${plan.doneDays + 1} is ${cur.count} pages` : ''}</div>
+        <ReaderSheet title={doneInfo && doneInfo.ahead ? `Day ${doneInfo.day} done ahead of schedule` : 'Today’s reading is done'} onClose={() => setSheet(null)} right={<span />}>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', margin: '-6px 0 20px', lineHeight: 1.4 }}>{plan.finished ? `All ${plan.days} days complete. Book finished!` : `Day ${Math.max(1, plan.doneDays)} of ${plan.days} complete${doneInfo && doneInfo.ahead ? ' · you’re ahead of your plan' : ''}${cur ? ` · Day ${plan.doneDays + 1} is ${cur.count} pages` : ''}`}</div>
           <StreakWeek ctx={ctx} style={{ marginBottom: 22 }} />
           <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
             <Button variant="soft" style={{ flex: 1 }} onClick={() => setSheet(null)}>Keep reading</Button>

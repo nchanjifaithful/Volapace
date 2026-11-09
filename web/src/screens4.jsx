@@ -25,7 +25,7 @@ function TodayScreen({ go, hostRef, ctx = {}, update, account, openBook }) {
   const ids = new Set(active.map(b => b.entry.id));
   const finished = ctx.bookId && ctx.finishedAt;
   return (
-    <div style={SCREEN_PAD}>
+    <div style={{ ...SCREEN_PAD, paddingBottom: 'calc(var(--sab) + 170px)' }}>
       <TodayHeader go={go} account={account} />
       {lib.length > 0 && <SearchBar placeholder="Search your library" onClick={() => go('library')} style={{ marginBottom: 16 }} />}
 
@@ -41,32 +41,30 @@ function TodayScreen({ go, hostRef, ctx = {}, update, account, openBook }) {
         </div>
       ) : active.map((b, i) => (
         <React.Fragment key={b.entry.id}>
-          {i === 1 && <SectionHead title="Also today" action={`${active.length - 1} more`} style={{ marginTop: 18 }} />}
+          {i === 1 && <SectionHead title="Also today" style={{ marginTop: 22 }} />}
           <TodayCard ctx={ctx} b={b} featured={i === 0}
             onRead={() => openBook(b.entry, 0, b.entry.paper ? 'book' : 'reader')}
             onPlan={() => openBook(b.entry)} />
         </React.Fragment>
       ))}
 
-      {doneSet(ctx).size > 0 && <div onClick={() => go('streak')} style={{ cursor: 'pointer', marginTop: active.length > 1 ? 6 : 0 }}><StreakWeek ctx={ctx} style={{ marginBottom: 12 }} /></div>}
+      {doneSet(ctx).size > 0 && <div onClick={() => go('streak')} style={{ cursor: 'pointer', marginTop: 10 }}><StreakWeek ctx={ctx} style={{ marginBottom: 12 }} /></div>}
       <OtherBooks go={go} ctx={ctx} lib={lib} skip={ids} openBook={openBook} />
     </div>
   );
 }
 
+// Logo and profile photo share one 44 px row; today's date sits underneath as the page title.
 function TodayHeader({ go, account }) {
-  const first = ((account && account.name) || '').trim().split(/\s+/)[0];
   return (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <Brand logo={30} size={28} />
-          <Eyebrow style={{ marginTop: 6 }}>{TODAY.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</Eyebrow>
-        </div>
-        <Avatar account={account} size={46} onClick={() => go('you')} />
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, height: 44 }}>
+        <Brand logo={36} size={30} />
+        <Avatar account={account} size={44} onClick={() => go('you')} />
       </div>
-      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 22, color: 'var(--ink)', letterSpacing: -0.4, lineHeight: 1.2, marginTop: 20 }}>
-        {first ? <>Welcome back, {first}</> : 'Welcome back'}
+      <div style={{ marginTop: 18 }}>
+        <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 13.5, color: 'var(--ink-2)' }}>{TODAY.toLocaleDateString(undefined, { weekday: 'long' })}</div>
+        <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 26, color: 'var(--ink)', letterSpacing: -0.6, lineHeight: 1.15, marginTop: 2 }}>{TODAY.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}</div>
       </div>
     </div>
   );
@@ -91,11 +89,11 @@ function TodayCard({ ctx, b, featured, onRead, onPlan }) {
   };
   return (
     <div key={done ? 'done' : 'open'} style={{ borderRadius: 'var(--card-radius)', background: featured ? 'var(--sage)' : 'var(--surface)', border: featured ? 'none' : '1px solid var(--line)', color: fg, padding: 16, display: 'flex', gap: 16, marginBottom: 12, animation: done ? 'pop .4s cubic-bezier(.2,1.3,.4,1)' : 'none' }}>
-      <button onClick={onPlan} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', borderRadius: 10, outline: featured ? '1.5px dashed rgba(255,255,255,0.6)' : 'none', outlineOffset: 4, alignSelf: 'flex-start', margin: featured ? 4 : 0 }}>
-        <BookCover book={book} w={featured ? 80 : 64} radius={8} style={{ boxShadow: 'none' }} />
+      <button onClick={onPlan} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', borderRadius: 8, alignSelf: 'flex-start' }}>
+        <BookCover book={book} w={featured ? 76 : 60} radius={8} style={{ boxShadow: 'none' }} />
       </button>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: done && !featured ? 'var(--sage)' : sub, fontWeight: done && !featured ? 600 : 400, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: done && !featured ? 'var(--ok)' : sub, fontWeight: done && !featured ? 600 : 400, display: 'flex', alignItems: 'center', gap: 5 }}>
           {done && <Icon name="check" size={13} stroke={2.6} />}{done ? 'Done for today' : `Today · Day ${plan.day} of ${plan.days}`}
         </div>
         <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: featured ? 21 : 18, letterSpacing: -0.3, lineHeight: 1.15, marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
@@ -107,7 +105,8 @@ function TodayCard({ ctx, b, featured, onRead, onPlan }) {
           <span style={{ fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{isTime ? `${mins}/${plan.minutes} min` : `${read}/${d.count}`}</span>
         </div>
         {done && <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12, color: sub, marginTop: 5 }}>Day {plan.day} next{isTime ? '' : ` · ${d.count} pages`}{read > 0 ? ' · reading ahead' : ''}</div>}
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+
           <button onClick={onRead} style={btn(true)}>{s.hasPdf ? (done ? 'Read ahead' : read > 0 ? 'Keep reading' : 'Start reading') : 'Log pages'}</button>
           <button onClick={onPlan} style={btn(false)}>View plan</button>
         </div>
@@ -226,6 +225,8 @@ function ProgressScreen({ ctx = {}, go, update, openModal, closeModal }) {
   const metDays = span ? Array.from({ length: span }, (_, i) => set.has(dayISO(shiftDay(TODAY, -i)))).filter(Boolean).length : null;
   const pickRange = (k) => { setRange(k); setSel(null); };
   const tm = todayMinutes(ctx);
+  const timePlans = activeBooks(ctx).filter(b => b.plan.goalType === 'time');
+  const minTarget = timePlans.length ? timePlans.reduce((n, b) => n + (b.plan.minutes || 0), 0) : 20;
   const pace = readingPace(ctx);
 
   const cheer = range === 'year'
@@ -287,12 +288,16 @@ function ProgressScreen({ ctx = {}, go, update, openModal, closeModal }) {
         </PCard>
 
         <PCard style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
-          <Ring value={tm.avg ? Math.min(100, tm.mins / tm.avg * 100) : tm.mins ? 100 : 0} size={44} stroke={5}><Icon name="clock" size={15} style={{ color: 'var(--ink)' }} /></Ring>
+          {/* The ring fills toward a target: your daily average once there's history (28 days);
+              before that, the minutes of your time-based plans, or 20 minutes. */}
+          {tm.mins > 0 && tm.mins >= (tm.hasAvg ? tm.avg : minTarget)
+            ? <div key="hit" style={{ width: 44, height: 44, borderRadius: 999, background: READ_GREEN, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, animation: 'pop .4s cubic-bezier(.2,1.4,.4,1)' }}><Icon name="check" size={22} stroke={2.8} /></div>
+            : <Ring value={Math.min(100, tm.mins / Math.max(1, tm.hasAvg ? tm.avg : minTarget) * 100)} size={44} stroke={5}><Icon name="clock" size={15} style={{ color: 'var(--ink)' }} /></Ring>}
           <div style={{ flex: 1, fontFamily: 'var(--font-ui)' }}>
             <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>{tm.mins} min today</div>
             <div style={{ fontSize: 12.5, color: 'var(--ink-2)', marginTop: 1 }}>
-              {!tm.hasAvg ? 'Time in the reader counts automatically'
-                : tm.diff > 0 ? <><b style={{ color: 'var(--sage)', fontWeight: 600 }}>+{tm.diff} min</b> over your daily average</>
+              {!tm.hasAvg ? (tm.mins >= minTarget ? `Past today’s ${minTarget}-minute target` : `${minTarget - tm.mins} min to today’s ${minTarget}-minute target`)
+                : tm.diff > 0 ? <><b style={{ color: READ_GREEN, fontWeight: 600 }}>+{tm.diff} min</b> over your daily average</>
                 : tm.diff === 0 ? 'Right on your daily average'
                 : <>{-tm.diff} min under your daily average of {tm.avg}</>}
             </div>
@@ -337,7 +342,7 @@ function ProgressScreen({ ctx = {}, go, update, openModal, closeModal }) {
   );
 }
 
-const bento = { padding: 16, borderRadius: 'var(--card-radius)', background: 'var(--fill)' };
+const bento = { padding: 16, borderRadius: 16, background: 'var(--fill)' };
 const bigNum = { fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 30, color: 'var(--ink)', lineHeight: 1, letterSpacing: -0.8 };
 const unit = { fontSize: 14, fontWeight: 500, color: 'var(--ink-2)', letterSpacing: 0 };
 

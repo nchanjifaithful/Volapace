@@ -16,6 +16,13 @@
 - **Import data** from a Volapace CSV or JSON export. Your history and streak come back even without the PDFs; progress waits for each book until you add it.
 - **Onboarding** asks your name and what kind of reader you are, and starts your pace from it.
 - **Streak widget** for the home screen.
+- **Library selection.** Press and hold a book (or ⋮ → Select books) to select several, then pause, resume, mark finished or remove them together. The bookmark button became a ⋮ menu.
+- **Book page** opens with the book itself: cover, title, author and tags, with days done, % read and the finish date underneath. "Today's reading is done" is a green banner of its own, and the reading outline switches between Upcoming, Done and All.
+- **Reading ahead counts.** Finishing the next day's pages early completes that day too, with the celebration.
+- **Streak card** shows the covers, titles and pages covered of every book you're reading. Streak days keep their tick, with covers when you read more than one book.
+- **Progress.** The minutes ring fills toward a real target and turns into a green tick when you reach it; Endurance averages real session lengths.
+- **Today** has the logo and your profile photo on one row, with the date as the heading. Notes sits before Library in the tab bar.
+- **One look throughout:** one green for "done", consistent type weights, headings, corners and press feedback.
 - **One splash screen**, with the Volapace logotype. New dark-mode and books-finished icons. Account was removed from Preferences (edit your details from the top of Profile).
 
 ## 1.1

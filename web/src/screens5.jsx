@@ -48,7 +48,22 @@ function VirtualRows({ count, rowHeight, render, overscan = 4 }) {
   return <div ref={ref} style={{ position: 'relative', height: count * rowHeight }}>{rows}</div>;
 }
 
-function LibraryScreen({ go, ctx = {}, openBook, forget, openModal, closeModal }) {
+// Press and hold for a moment (without moving) — used for selecting books
+function useHold(onHold, ms = 450) {
+  const t = React.useRef(null), start = React.useRef(null), fired = React.useRef(false);
+  const cancel = () => { clearTimeout(t.current); t.current = null; };
+  return {
+    fired,
+    handlers: {
+      onPointerDown: (e) => { fired.current = false; start.current = { x: e.clientX, y: e.clientY }; cancel(); t.current = setTimeout(() => { fired.current = true; Platform.vibrate([12]); onHold(); }, ms); },
+      onPointerMove: (e) => { if (t.current && start.current && Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 8) cancel(); },
+      onPointerUp: cancel, onPointerCancel: cancel, onPointerLeave: cancel,
+      onContextMenu: (e) => e.preventDefault(),
+    },
+  };
+}
+
+function LibraryScreen({ go, ctx = {}, update, openBook, forget, openModal, closeModal, sel, setSel }) {
   const [filter, setFilter] = React.useState('all');
   const [view, setView] = React.useState('grid');
   const [openId, setOpenId] = React.useState(null);
@@ -58,9 +73,37 @@ function LibraryScreen({ go, ctx = {}, openBook, forget, openModal, closeModal }
   const needle = q.trim().toLowerCase();
   const shown = ALL.filter(b => (filter === 'all' || b.status === filter) && (!needle || b.title.toLowerCase().includes(needle) || (b.author || '').toLowerCase().includes(needle)));
   const finished = ALL.filter(b => b.status === 'completed').length;
-  const open = (b) => openBook(b.entry);
   const remove = (b) => openModal(<RemoveBookSheet entry={b.entry} close={closeModal} onRemoved={() => { closeModal(); if (b.id === ctx.bookId) forget && forget(); }} />);
   const label = LIB_FILTERS.find(f => f[0] === filter)[1];
+
+  // ── selection: press and hold a book (or ⋮ → Select books), then act on several at once ──
+  const selecting = !!sel;
+  const selSet = new Set(sel || []);
+  const toggle = (id) => setSel(s => { const x = new Set(s || []); x.has(id) ? x.delete(id) : x.add(id); return [...x]; });
+  const startSel = (id) => { setOpenId(null); setSel(id ? [id] : []); };
+  const open = (b) => (selecting ? toggle(b.id) : openBook(b.entry));
+  const picked = ALL.filter(b => selSet.has(b.id));
+  const canPause = picked.filter(b => b.status === 'active' && b.planned);
+  const canResume = picked.filter(b => b.status === 'paused');
+  const canFinish = picked.filter(b => b.status !== 'completed');
+  const [menu, setMenu] = React.useState(false);
+  // change a book's own fields: the open book through update(), the others in their library snapshot
+  const patchBook = (b, patch) => {
+    if (b.id === ctx.bookId) update(patch);
+    else { const e = Lib.get(b.id); if (e) Lib.upsert({ id: b.id, snap: { ...(e.snap || {}), ...patch }, ...('finishedAt' in patch ? { finishedAt: patch.finishedAt } : {}) }); }
+  };
+  const done = (msg) => { setSel(null); Platform.toast(msg); };
+  const pauseSel = () => { canPause.forEach(b => patchBook(b, { paused: true })); done(`${canPause.length} paused`); };
+  const resumeSel = () => { canResume.forEach(b => patchBook(b, { paused: false })); done(`${canResume.length} resumed`); };
+  const finishSel = () => {
+    const today = dayISO(TODAY), now = Date.now();
+    canFinish.forEach(b => patchBook(b, { finishedAt: now, paused: false }));
+    const fin = [...(ctx.finished || [])];
+    canFinish.forEach(b => { if (!fin.some(f => f.id === b.id)) fin.push({ id: b.id, title: b.title, pages: b.pages, date: today }); });
+    update({ finished: fin });
+    done(`${canFinish.length} marked finished`);
+  };
+  const removeSel = () => openModal(<RemoveBookSheet entries={picked.map(b => b.entry)} close={closeModal} onRemoved={(ids) => { closeModal(); if (ids.includes(ctx.bookId)) forget && forget(); setSel(null); }} />);
 
   // grid geometry: 3 columns inside 22px gutters, 12px gaps; title area fixed at two lines
   const [vw, setVw] = React.useState(() => window.innerWidth);
@@ -72,17 +115,37 @@ function LibraryScreen({ go, ctx = {}, openBook, forget, openModal, closeModal }
 
   const gridRow = (r) => (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', columnGap: 12 }}>
-      {shown.slice(r * 3, r * 3 + 3).map(b => <GridBook key={b.id} book={b} onClick={() => open(b)} />)}
+      {shown.slice(r * 3, r * 3 + 3).map(b => <GridBook key={b.id} book={b} onClick={() => open(b)} onHold={() => (selecting ? toggle(b.id) : startSel(b.id))} selecting={selecting} selected={selSet.has(b.id)} />)}
     </div>
   );
-  const listRow = (b) => <SwipeRow key={b.id} book={b} go={() => open(b)} onRemove={() => remove(b)} open={openId === b.id} setOpen={(v) => setOpenId(v ? b.id : null)} />;
+  const listRow = (b) => <SwipeRow key={b.id} book={b} go={() => open(b)} onRemove={() => remove(b)} open={openId === b.id} setOpen={(v) => setOpenId(v ? b.id : null)}
+    onHold={() => (selecting ? toggle(b.id) : startSel(b.id))} selecting={selecting} selected={selSet.has(b.id)} />;
 
   return (
-    <div style={{ ...SCREEN_PAD, position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-        <h1 style={H1}>Library</h1>
-        {ALL.length > 0 && <IconBtn name="bookmark" onClick={() => openModal(<AllBookmarksSheet ctx={ctx} close={closeModal} onOpen={(e, p) => { closeModal(); openBook(e, p); }} />)} />}
-      </div>
+    <div style={{ ...SCREEN_PAD, position: 'relative', paddingBottom: selecting ? 'calc(var(--sab) + 240px)' : SCREEN_PAD.paddingBottom }}
+      onClick={(e) => { if (selecting && !e.target.closest('[data-book],[data-selbar]')) setSel(null); }}>
+      {(
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, position: 'relative', minHeight: 44 }}>
+          <h1 style={H1}>Library</h1>
+          {ALL.length > 0 && !selecting && <IconBtn name="more" onClick={() => setMenu(m => !m)} dark={menu} />}
+          {menu && <>
+            <div onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 6 }} />
+            <div style={{ position: 'absolute', top: 52, right: 0, zIndex: 7, width: 236, padding: '4px 14px', borderRadius: 20, background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-float)', animation: 'pop .18s ease-out', transformOrigin: 'top right' }}>
+              {[['check', 'Select books', 'Pause, finish or remove several', () => { setMenu(false); startSel(null); }],
+                ['bookmark', 'All bookmarks', 'Saved pages across books', () => { setMenu(false); openModal(<AllBookmarksSheet ctx={ctx} close={closeModal} onOpen={(e, p) => { closeModal(); openBook(e, p); }} />); }],
+                ['plus', 'Add a book', 'A PDF or a paper book', () => { setMenu(false); go('upload'); }]].map(([ic, l, sub, fn], i, arr) => (
+                <button key={l} onClick={fn} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', background: 'none', border: 'none', borderBottom: i < arr.length - 1 ? '1px solid var(--line)' : 'none', cursor: 'pointer', textAlign: 'left' }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 999, background: 'var(--fill)', color: 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon name={ic} size={17} /></div>
+                  <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-ui)' }}>
+                    <div style={{ fontWeight: 500, fontSize: 14.5, color: 'var(--ink)' }}>{l}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 1 }}>{sub}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-ui)', fontSize: 14, color: 'var(--ink-2)', marginBottom: 16 }}>
         <Icon name="library" size={16} /> {ALL.length} book{ALL.length === 1 ? '' : 's'} on this phone &middot; {finished} finished
       </div>
@@ -128,19 +191,41 @@ function LibraryScreen({ go, ctx = {}, openBook, forget, openModal, closeModal }
         {view === 'grid' ? (
           VIRTUAL ? <VirtualRows count={Math.ceil(shown.length / 3)} rowHeight={gridRowH} render={gridRow} />
           : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', columnGap: 12, rowGap: 20 }}>
-            {shown.map(b => <GridBook key={b.id} book={b} onClick={() => open(b)} />)}
+            {shown.map(b => <GridBook key={b.id} book={b} onClick={() => open(b)} onHold={() => (selecting ? toggle(b.id) : startSel(b.id))} selecting={selecting} selected={selSet.has(b.id)} />)}
           </div>
         ) : (
           <>
             {VIRTUAL ? <VirtualRows count={shown.length} rowHeight={listRowH} render={(i) => listRow(shown[i])} />
               : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{shown.map(listRow)}</div>}
-            {shown.length > 0 && <div style={{ textAlign: 'center', marginTop: 16, fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)' }}>
-              Swipe right to read, left to remove
+            {shown.length > 0 && !selecting && <div style={{ textAlign: 'center', marginTop: 16, fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)' }}>
+              Swipe right to read, left to remove &middot; hold to select
             </div>}
           </>
         )}
       </div>
       </>}
+
+      {/* selection: a card above the tab bar with the count, Select all and the actions */}
+      {selecting && (
+        <div data-selbar style={{ position: 'fixed', left: 14, right: 14, bottom: 'calc(var(--sab) + 82px)', zIndex: 50, padding: '12px 14px 10px', borderRadius: 'var(--card-radius)', background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: 'var(--shadow-float)', animation: 'fadeUp .22s cubic-bezier(.2,.8,.2,1)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 10, borderBottom: '1px solid var(--line)' }}>
+            <span style={{ flex: 1, fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 15.5, color: 'var(--ink)', letterSpacing: -0.2 }}>{picked.length ? `${picked.length} selected` : 'Tap books to select'}</span>
+            <Chip on={picked.length === shown.length && shown.length > 0} onClick={() => setSel(picked.length === shown.length ? [] : shown.map(b => b.id))} style={{ height: 32, padding: '0 14px', fontSize: 13 }}>{picked.length === shown.length && shown.length ? 'Clear' : 'Select all'}</Chip>
+            <IconBtn name="close" size={32} onClick={() => setSel(null)} />
+          </div>
+          <div style={{ display: 'flex', paddingTop: 10 }}>
+            {[['pause', 'Pause', canPause.length, pauseSel], ['play', 'Resume', canResume.length, resumeSel], ['bookCheck', 'Finished', canFinish.length, finishSel], ['trash', 'Remove', picked.length, removeSel]].map(([ic, l, n, fn]) => {
+              const red = l === 'Remove';
+              return (
+                <button key={l} onClick={fn} disabled={!n} style={{ flex: 1, border: 'none', background: 'none', padding: 0, opacity: n ? 1 : 0.35, cursor: n ? 'pointer' : 'default', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 40, height: 40, borderRadius: 999, background: red ? 'var(--sage-soft)' : 'var(--fill)', color: red ? 'var(--sage)' : 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={ic} size={19} /></span>
+                  <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 11.5, color: red ? 'var(--sage)' : 'var(--ink-2)' }}>{l}{n && !red && n !== picked.length ? ` · ${n}` : ''}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -159,16 +244,29 @@ const GRID_STATE = {
   unscheduled: { label: 'Saved',    solid: 'var(--st-saved)',    solidFg: '#fff', icon: 'bookmark' },
 };
 
-function GridBook({ book, onClick }) {
+function SelDot({ on, style = {} }) {
+  return (
+    <span style={{ width: 24, height: 24, borderRadius: 999, boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+      background: on ? 'var(--sage)' : 'rgba(255,255,255,0.92)', border: on ? 'none' : '1.5px solid rgba(0,0,0,0.3)', color: '#fff', animation: on ? 'pop .2s ease-out' : 'none', ...style }}>
+      {on && <Icon name="check" size={14} stroke={3} />}
+    </span>
+  );
+}
+
+function GridBook({ book, onClick, onHold, selecting, selected }) {
   const [press, setPress] = React.useState(false);
+  const hold = useHold(() => { setPress(false); onHold && onHold(); });
   const st = GRID_STATE[book.status] || GRID_STATE.unscheduled;
   const showPct = book.status === 'active' || book.status === 'paused';
+  const h = hold.handlers;
   return (
-    <button onClick={onClick} onPointerDown={() => setPress(true)} onPointerUp={() => setPress(false)} onPointerLeave={() => setPress(false)}
-      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start', alignSelf: 'start', transform: press ? 'scale(0.96)' : 'none', transition: 'transform .14s' }}>
-      <div style={{ position: 'relative' }}>
+    <button data-book onClick={() => { if (hold.fired.current) { hold.fired.current = false; return; } onClick(); }}
+      onPointerDown={(e) => { setPress(true); h.onPointerDown(e); }} onPointerMove={h.onPointerMove} onPointerUp={() => { setPress(false); h.onPointerUp(); }} onPointerLeave={() => { setPress(false); h.onPointerLeave(); }} onPointerCancel={() => { setPress(false); h.onPointerCancel(); }} onContextMenu={h.onContextMenu}
+      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start', alignSelf: 'start', transform: press ? 'scale(0.96)' : selecting && selected ? 'scale(0.94)' : 'none', transition: 'transform .14s', WebkitTouchCallout: 'none' }}>
+      <div style={{ position: 'relative', borderRadius: 12, outline: selecting && selected ? '2.5px solid var(--sage)' : 'none', outlineOffset: 2 }}>
+        {selecting && <SelDot on={selected} style={{ position: 'absolute', left: 6, top: 6, zIndex: 2 }} />}
         <BookCover book={book} w={108} radius={10} foot={22} head={showPct ? 18 : 0} style={{ width: '100%', height: 'auto', aspectRatio: '2/3', boxShadow: 'none' }} />
-        {showPct && <span style={{ position: 'absolute', right: 6, top: 6, height: 20, padding: '0 7px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', background: '#fff', color: '#141414', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 11, fontVariantNumeric: 'tabular-nums', boxShadow: '0 1px 4px rgba(0,0,0,0.25)' }}>{bookPage(book)}/{book.pages}</span>}
+        {showPct && <span style={{ position: 'absolute', right: 6, top: 6, height: 20, padding: '0 7px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', background: '#fff', color: '#141414', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 11, fontVariantNumeric: 'tabular-nums', boxShadow: '0 1px 4px rgba(0,0,0,0.25)' }}>{bookPage(book)}/{book.pages}</span>}
         <span style={{ position: 'absolute', left: 6, bottom: 6, display: 'inline-flex', alignItems: 'center', gap: 3, height: 18, padding: st.icon ? '0 6px 0 5px' : '0 7px', borderRadius: 999,
           background: st.solid, color: st.solidFg, fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 9.5, boxShadow: '0 1px 4px rgba(0,0,0,0.25)' }}>
           {st.icon && <Icon name={st.icon} size={9} stroke={2.6} />}{st.label}
@@ -180,17 +278,20 @@ function GridBook({ book, onClick }) {
   );
 }
 
-function SwipeRow({ book, go, open, setOpen, onRemove }) {
+function SwipeRow({ book, go, open, setOpen, onRemove, onHold, selecting, selected }) {
   const [dx, setDx] = React.useState(0);
   const drag = React.useRef(null);
+  const hold = useHold(() => { drag.current = null; setDx(0); onHold && onHold(); });
   const REVEAL = 88, THRESH = 50;
   React.useEffect(() => { if (!open) setDx(0); }, [open]);
-  const onDown = (e) => { drag.current = { x: e.clientX, base: dx }; e.currentTarget.setPointerCapture(e.pointerId); };
+  const onDown = (e) => { hold.handlers.onPointerDown(e); if (selecting) return; drag.current = { x: e.clientX, base: dx }; e.currentTarget.setPointerCapture(e.pointerId); };
   const onMove = (e) => {
+    hold.handlers.onPointerMove(e);
     if (!drag.current) return;
     setDx(Math.max(-REVEAL - 20, Math.min(REVEAL + 20, drag.current.base + (e.clientX - drag.current.x))));
   };
   const onUp = () => {
+    hold.handlers.onPointerUp();
     if (!drag.current) return;
     drag.current = null;
     if (dx > THRESH) { setDx(REVEAL); setOpen(true); }
@@ -198,7 +299,7 @@ function SwipeRow({ book, go, open, setOpen, onRemove }) {
     else { setDx(0); setOpen(false); }
   };
   const moved = Math.abs(dx) > 4;
-  const tap = () => { if (open) { setDx(0); setOpen(false); } else if (!moved) go(); };
+  const tap = () => { if (hold.fired.current) { hold.fired.current = false; return; } if (open) { setDx(0); setOpen(false); } else if (!moved) go(); };
   const act = (bg, icon, label, show, onClick) => (
     <button onClick={onClick} style={{ width: REVEAL, background: bg, border: 'none', cursor: 'pointer', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, opacity: show ? 1 : 0 }}>
       <Icon name={icon} size={21} /><span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 11 }}>{label}</span>
@@ -206,15 +307,18 @@ function SwipeRow({ book, go, open, setOpen, onRemove }) {
   );
 
   return (
-    <div style={{ position: 'relative', borderRadius: 18, overflow: 'hidden', background: 'var(--surface)', border: '1px solid var(--line)' }}>
+    <div data-book style={{ position: 'relative', borderRadius: 20, overflow: 'hidden', background: 'var(--surface)', border: '1px solid var(--line)' }}>
+
       <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
         {act('var(--ink)', 'play', 'Read', dx > 0, () => { setDx(0); setOpen(false); go(); })}
         <div style={{ flex: 1 }} />
         {act('var(--sage)', 'close', onRemove ? 'Remove' : 'Archive', dx < 0, () => { setDx(0); setOpen(false); onRemove && onRemove(); })}
       </div>
-      <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onClick={tap}
-        style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: 12, background: 'var(--surface)', cursor: 'pointer', touchAction: 'pan-y',
+      <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onClick={tap} onContextMenu={hold.handlers.onContextMenu}
+        style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: 12, background: selecting && selected ? 'var(--sage-soft)' : 'var(--surface)', cursor: 'pointer', touchAction: 'pan-y', WebkitTouchCallout: 'none',
           transform: `translateX(${dx}px)`, transition: drag.current ? 'none' : 'transform .28s cubic-bezier(.2,.8,.2,1)' }}>
+        {selecting && <SelDot on={selected} />}
+
         <BookCover book={book} w={52} radius={7} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -473,7 +577,7 @@ function ReadingWindowsSheet({ close, value = DEFAULT_QUIET, onSave }) {
             const sel = days[d];
             return (
               <button key={d} onClick={() => setDays(s => ({ ...s, [d]: !s[d] }))} style={{
-                flex: 1, height: 44, cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 12.5,
+                flex: 1, height: 44, cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 12.5,
                 border: `1px solid ${sel ? 'var(--ink)' : 'var(--line)'}`, borderRadius: 999,
                 background: sel ? 'var(--ink)' : 'var(--fill)', color: sel ? 'var(--cream)' : 'var(--ink-3)',
               }}>{d[0]}</button>

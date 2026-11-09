@@ -2,7 +2,7 @@
 
 const ACCENT = '#D90429';
 const ONBOARD = ['intro', 'hello', 'upload', 'scan', 'pace', 'reminders', 'summary', 'welcome'];
-const TABS = ['today', 'progress', 'library', 'notes', 'you'];
+const TABS = ['today', 'progress', 'notes', 'library', 'you'];
 const PUSHED = ['book', 'reader', 'streak'];
 const VALID = [...ONBOARD, ...TABS, ...PUSHED];
 const FULL = ['reader', 'intro', 'welcome', 'streak']; // screens that fill the viewport exactly
@@ -24,6 +24,7 @@ function App() {
   const [account, setAccountRaw] = React.useState(() => ({ name: '', email: '', since: '', ...readJSON('vp_account', {}) }));
   const [anim, setAnim] = React.useState('in');
   const [modal, setModal] = React.useState(null);
+  const [libSel, setLibSel] = React.useState(null); // Library: ids of selected books, or null when not selecting
   const [splash, setSplash] = React.useState(true);
   const prevRef = React.useRef('today'); // where a pushed screen was opened from
   const paceFrom = React.useRef('upload'); // where Back on "Choose your pace" goes
@@ -53,7 +54,7 @@ function App() {
   // ── navigation ──
   const navigate = (next, data) => {
     if (data) setCtx(c => applyHistory(c, data));
-    setModal(null);
+    setModal(null); setLibSel(null);
     setAnim('out');
     setTimeout(() => { setScreen(next); setAnim('in'); if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 160);
   };
@@ -156,6 +157,7 @@ function App() {
   // ── Android back button ──
   window.__vpBack = () => {
     if (modal) { setModal(null); return true; }
+    if (libSel) { setLibSel(null); return true; }
     if (PUSHED.includes(screen)) { bookBack(); return true; }
     if (['pace', 'scan', 'reminders', 'summary'].includes(screen)) { back(); return true; }
     if (screen === 'welcome') { navigate('today'); return true; }
@@ -179,7 +181,7 @@ function App() {
 
       case 'progress': return <ProgressScreen ctx={ctx} go={go} update={update} openModal={openModal} closeModal={closeModal} />;
       case 'streak':   return <StreakScreen ctx={ctx} onBack={bookBack} />;
-      case 'library':  return <LibraryScreen go={go} ctx={ctx} openBook={openBook} forget={forget} openModal={openModal} closeModal={closeModal} />;
+      case 'library':  return <LibraryScreen go={go} ctx={ctx} update={update} openBook={openBook} forget={forget} openModal={openModal} closeModal={closeModal} sel={libSel} setSel={setLibSel} />;
       case 'notes':    return <NotesScreen ctx={ctx} openBook={openBook} />;
       case 'you':      return <YouScreen go={go} theme={themeMode} setTheme={setThemeMode} openModal={openModal} closeModal={closeModal} account={account} setAccount={setAccount} ctx={ctx} update={update} />;
       case 'book':     return <PlanScreen key={(ctx.bookId || 's') + ':' + (ctx.planVer || 0)} openModal={openModal} closeModal={closeModal} ctx={ctx} update={update} go={go} restart={restart} hostRef={confettiRef} onBack={bookBack} planBook={planBook} onRemoved={() => { forget(); navigate(TABS.includes(prevRef.current) ? prevRef.current : 'library'); }} />;
@@ -208,7 +210,8 @@ function App() {
         </div>
       </PhoneShell>
       {/* add a book: floating action button on Today and Library */}
-      {(screen === 'today' || screen === 'library') && !modal && (
+      {(screen === 'today' || screen === 'library') && !modal && !libSel && (
+
         <button onClick={() => go('upload')} aria-label="Add a book" style={{ position: 'fixed', right: 20, bottom: 'calc(var(--sab) + 86px)', zIndex: 50, width: 58, height: 58, borderRadius: 999, border: 'none', cursor: 'pointer', background: 'var(--ink)', color: 'var(--cream)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'pop .3s cubic-bezier(.2,1.3,.4,1)' }}>
           <Icon name="plus" size={26} stroke={2.2} />
         </button>
