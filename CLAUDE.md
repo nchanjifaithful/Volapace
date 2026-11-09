@@ -2,6 +2,103 @@
 
 Volapace is an offline-first PDF reading planner. The HTML prototype (`Volapace.html` + `*.jsx`) is the design reference. Use it for screens, flows, copy and interaction details. Don't use it for production architecture.
 
+# Developing Volapace
+
+Read this part first. The sections after "Design handoff" are the original product requirements; this part describes the app as it is actually built.
+
+## What it is
+
+An Android app (Java, no third-party libraries) that hosts the design's React screens in a WebView. React, pdf.js (with its cMaps and standard fonts) and the three fonts are bundled into the APK, so the UI never touches the network.
+
+- Repo: https://github.com/nchanjifaithful/Volapace (public). Releases ship the signed APK.
+- Package `app.volapace`, minSdk 26, target/compile 34, Java 17.
+- Original design files (not in the repo): `D:\Projects\Volapace\design\volapace_handoff\prototype\`. The official logo: `D:\Projects\Volapace\Volapace Logo.svg`, with derived copies in `brand/`.
+
+## Machine setup (Windows)
+
+- **Node.js 26 LTS** is installed system-wide (`C:\Program Files\nodejs`, via `winget install OpenJS.NodeJS.LTS`). If a shell can't find `node`, prepend it: `export PATH="/c/Program Files/nodejs:$PATH"` (Git Bash).
+- **No Android SDK or JDK locally.** APKs are built only by GitHub Actions. Don't try to run Gradle locally.
+- **gh** is logged in as `nchanjifaithful`.
+- The signing key lives in GitHub secrets (`VOLAPACE_KEYSTORE_BASE64`, `VOLAPACE_KEYSTORE_PASSWORD`). The only backup is `~/.volapace-signing` (fingerprint `BA:08:9A:1B…9B:4C`). Never regenerate it: updates only install over builds signed with this key. `setup-signing.sh` refuses to overwrite it.
+
+## Build and preview the UI
+
+```bash
+cd web
+npm ci                 # first time, or after package-lock changes
+node build.mjs --dev   # readable build; plain `npm run build` minifies
+node serve.mjs         # http://localhost:5178
+```
+
+- `build.mjs` compiles `web/src/*.jsx` with esbuild and writes everything to `app/src/main/assets/www/`, which is gitignored and generated.
+- In the desktop app's browser pane, use `preview_start` with the `volapace-web` config in `.claude/launch.json`, then switch the viewport to mobile.
+- In a browser, `platform.jsx` falls back to IndexedDB for PDFs and `<a download>` for files. No `window.VPNative` means browser mode.
+- npm 11 prints an "install-scripts" warning on `npm ci`. It's harmless: esbuild ships its binary as a package.
+
+## Release flow
+
+- Push to branch `next`: CI builds a signed APK artifact for review (no release). Use it to show work before publishing.
+- Merge to `main` (fast-forward), then tag: `git tag -a v1.2 -m "Volapace 1.2" && git push origin v1.2`. CI publishes the "Volapace 1.2" release with `Volapace-v1.2.apk`, using the newest `## x.y` section of `CHANGELOG.md` as notes.
+- Before tagging, bump `versionName` in `app/build.gradle.kts` and add the changelog section. `versionCode` comes from the CI run number automatically.
+- Don't publish a release before the user has approved the changes.
+- Workflow: `.github/workflows/build.yml` (Node 22 → `npm ci && npm run build` in `web/` → JDK 17 + SDK 34 → `assembleRelease` → apksigner check → release on tags).
+
+## Code map
+
+```
+app/src/main/java/app/volapace/
+  MainActivity.java     WebView host. Serves assets at https://volapace.local/ via shouldInterceptRequest
+                        (/pdf/<id>, /cover/<id>.jpg, everything else from assets/www). Edge-to-edge insets → CSS
+                        --sat/--sab. File pick/save, photo pick, folder access, update check, back button.
+  Bridge.java           window.VPNative: every call the UI can make. Async calls take a callback id and answer
+                        through window.__vp.resolve(id, json).
+  Library.java          Books folder index (index.json): content-hash ids (SHA-1 of size + first/last 64 KB), page
+                        counts and 240 px covers via PdfRenderer, FileObserver, incremental scan. Folder is
+                        /storage/emulated/0/Volapace once "All files access" is granted, else the app's own folder.
+  ReaderWebView.java    Adds Highlight / Note to Android's text-selection menu while the reader is open.
+  Reminders.java        AlarmManager + local notifications: daily reminder, streak rescue, quiet hours.
+                        Receivers: ReminderReceiver, BootReceiver. ShareProvider serves files to the share sheet.
+web/src/ (load order is in build.mjs — the files share globals, as in the prototype; no imports)
+  platform.jsx          JS side of the bridge + browser fallback. Defines TODAY (real local date).
+  theme.jsx, logo.jsx   Design atoms and icons; the logo (flat colours, no gradients) and <Brand>.
+  library-data.jsx      BookCover, entryBook() (library entry → book model), status meta. No sample books.
+  reader.jsx            Lib (library + sync with the folder index), PdfStore (open docs), BOOK_FIELDS,
+                        planSchedule()/planOf() (all plan math), streaks, PdfPage renderer.
+  reader-view.jsx       The reader: paging/vertical scroll, pinch + double-tap zoom, page ticks, day-end
+                        markers, persistent search with on-page hits, ⋮ menu, notes, timer.
+  stats.jsx             applyHistory() (reading log), lifetimeStats, rangeStats (calendar weeks/months).
+  screens1–5.jsx        Upload/paper book, Pace, Plan, Today/Progress, Library/Profile and sheets.
+  onboarding.jsx        Splash, intro, reminders & rest days, summary, welcome animation.
+  streak.jsx            Streak screen and share card (DOM preview + canvas PNG).
+  shell.jsx, app.jsx    Full-screen shell, routing, persistence, reminders sync, FAB, back button.
+```
+
+## How state works
+
+- One `ctx` object (localStorage `vp_ctx`) holds the current book plus global state. Per-book keys are listed in `BOOK_FIELDS`. When you switch books they're snapshotted into the library entry (`Lib`, localStorage `vp_lib`). **Any new per-book field must be added to `BOOK_FIELDS`.**
+- Every change goes through `update(data)` → `applyHistory()`, which also writes the reading log (`ctx.log`), page deltas, sessions and finished books. Special keys: `logPages`, `endSession`.
+- The plan is derived, never stored as screen state: `planSchedule(ctx)` builds the days from `days`, `doneDays`, `planDays` (`counts`, `skipped`) and `planVer`. `markTodayDone()` advances `doneDays` and adds today to `doneDates`.
+- Pages ticked as read: `ctx.readPages`. Rest days: `ctx.restDays` (array of weekday numbers; older plans used `catchUp`). New plans are drafts (`planDraft`) until Summary → Start.
+- Global settings: `notify` (on, time, rescue, rescueTime), `quiet`, `yearGoal`, `autoCatchUp`. Profile: localStorage `vp_account` (name, email, ISO `since`, `photo` data URL).
+
+## Product rules agreed with the user
+
+- The app starts **empty**: no sample books, numbers or profile. Every figure comes from real use.
+- Stay **as close to the original design** as possible: white pages, ink type, 1 px bordered cards, black pill buttons, red `#D90429` as the accent. **No gradients**, no decorative shadows or glows.
+- Onboarding: Splash → Intro → "What are you reading next?" → Pace → Reminders (daily reminder + rest days only, skippable) → Summary → Welcome. Quiet hours and streak rescue live in Profile → Reminders.
+- Network: only Profile → "Check for updates" (GitHub releases API). The WebView itself can't load anything off-device.
+
+## Gotchas
+
+- Strings in JSX attributes don't decode HTML entities, and JSX text doesn't decode `\u` escapes. Use `{'\u2019'}` in attributes and `&rsquo;` in text.
+- Big shell heredocs with curly quotes or `\u` escapes have broken in this environment. Use the file tools for large edits.
+- Screens that fill the viewport exactly (reader, intro, welcome, streak) are listed in `FULL` in `app.jsx`.
+- Use `var(--sat)` / `var(--sab)` for top and bottom spacing, not fixed iPhone values.
+- To test PDFs in the browser, put a generated PDF into IndexedDB `volapace-dev`/`files` and call `window.__vp.library()`.
+- Never tested on a real phone yet: All-files-access folder move, Check for updates, the Highlight/Note selection menu.
+
+# Design handoff (original requirements)
+
 ## Pending requirement: "On this phone" = a dedicated folder of PDFs
 
 **Not implemented in the prototype. Build it in the native app.**
