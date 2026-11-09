@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Launch screen before Android 12: red with the white Volapace mark (matches the in-app splash). -->
+<!-- Launch screen: plain red. The in-app splash then shows the Volapace logotype (one splash, not two). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item><color android:color="#D90429" /></item>
-    <item android:gravity="center" android:width="120dp" android:height="120dp" android:drawable="@drawable/splash_logo_small" />
 </layer-list>

@@ -3,29 +3,123 @@
 const H1 = { fontFamily: 'var(--font-serif)', fontWeight: 600, fontSize: 30, color: 'var(--ink)', margin: 0, letterSpacing: -0.6, lineHeight: 1.1 };
 const SCREEN_PAD = { minHeight: '100%', padding: 'calc(var(--sat) + 12px) 22px calc(var(--sab) + 120px)', boxSizing: 'border-box' };
 
-function TodayScreen({ go, hostRef, ctx = {}, update, account, openBook }) {
-  const lib = useLib();
-  const hasPlan = !!(ctx.bookId && ctx.days && !ctx.planDraft);
-  if (!hasPlan) return <TodayEmpty go={go} ctx={ctx} account={account} lib={lib} openBook={openBook} />;
-  return <TodayPlan go={go} hostRef={hostRef} ctx={ctx} update={update} account={account} lib={lib} openBook={openBook} />;
+// Books with a live plan that aren't finished or paused. Each has its own day and its own progress;
+// only the streak is shared.
+function activeBooks(ctx) {
+  const out = [];
+  for (const e of Lib.visible()) {
+    const cur = e.id === ctx.bookId;
+    const s0 = cur ? ctx : (e.snap || {});
+    if (!hasPlan(s0) || s0.finishedAt || e.finishedAt || s0.paused) continue;
+    const s = { ...s0, title: e.title, author: e.author || '', pages: s0.pages || e.pages, bookId: e.id, hasPdf: !e.paper };
+    const plan = planOf(s);
+    if (plan.finished) continue;
+    out.push({ entry: e, s, plan, cur });
+  }
+  return out.sort((a, b) => (b.cur - a.cur) || ((b.entry.lastOpened || b.entry.addedAt || 0) - (a.entry.lastOpened || a.entry.addedAt || 0)));
 }
 
-function TodayHeader({ go, account }) {
+function TodayScreen({ go, hostRef, ctx = {}, update, account, openBook }) {
+  const lib = useLib();
+  const active = activeBooks(ctx);
+  const ids = new Set(active.map(b => b.entry.id));
+  const finished = ctx.bookId && ctx.finishedAt;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-      <div>
-        <Eyebrow style={{ marginBottom: 2 }}>{TODAY.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</Eyebrow>
-        <Brand logo={30} size={28} />
-      </div>
-      <Avatar account={account} size={46} onClick={() => go('you')} />
+    <div style={SCREEN_PAD}>
+      <TodayHeader go={go} account={account} />
+      {lib.length > 0 && <SearchBar placeholder="Search your library" onClick={() => go('library')} style={{ marginBottom: 16 }} />}
+
+      {active.length === 0 ? (
+        <div style={{ borderRadius: 'var(--card-radius)', background: 'var(--sage)', color: '#fff', padding: 20, marginBottom: 12 }}>
+          <div style={{ width: 48, height: 48, borderRadius: 999, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}><Icon name={finished ? 'check' : 'book'} size={24} /></div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 21, letterSpacing: -0.3, lineHeight: 1.15 }}>{finished ? 'Book finished. What’s next?' : lib.length ? 'Pick a book to plan' : 'Start your first reading plan'}</div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13.5, opacity: 0.85, marginTop: 6, lineHeight: 1.4 }}>Add a PDF or a paper book, set a pace, and Volapace turns it into a few pages a day.</div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+            <button onClick={() => go('upload')} style={featBtn(true)}>Add a book</button>
+            {lib.length > 0 && <button onClick={() => go('library')} style={featBtn(false)}>Open library</button>}
+          </div>
+        </div>
+      ) : active.map((b, i) => (
+        <React.Fragment key={b.entry.id}>
+          {i === 1 && <SectionHead title="Also today" action={`${active.length - 1} more`} style={{ marginTop: 18 }} />}
+          <TodayCard ctx={ctx} b={b} featured={i === 0}
+            onRead={() => openBook(b.entry, 0, b.entry.paper ? 'book' : 'reader')}
+            onPlan={() => openBook(b.entry)} />
+        </React.Fragment>
+      ))}
+
+      {doneSet(ctx).size > 0 && <div onClick={() => go('streak')} style={{ cursor: 'pointer', marginTop: active.length > 1 ? 6 : 0 }}><StreakWeek ctx={ctx} style={{ marginBottom: 12 }} /></div>}
+      <OtherBooks go={go} ctx={ctx} lib={lib} skip={ids} openBook={openBook} />
     </div>
   );
 }
 
-// Other books: ones with a plan (continue) and ones saved without one (up next)
-function OtherBooks({ go, ctx, lib, openBook }) {
-  const others = lib.filter(e => e.id !== ctx.bookId).map(e => entryBook(e, ctx));
-  const continuing = others.filter(b => b.status === 'paused');
+function TodayHeader({ go, account }) {
+  const first = ((account && account.name) || '').trim().split(/\s+/)[0];
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <Brand logo={30} size={28} />
+          <Eyebrow style={{ marginTop: 6 }}>{TODAY.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</Eyebrow>
+        </div>
+        <Avatar account={account} size={46} onClick={() => go('you')} />
+      </div>
+      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 22, color: 'var(--ink)', letterSpacing: -0.4, lineHeight: 1.2, marginTop: 20 }}>
+        {first ? <>Welcome back, {first}</> : 'Welcome back'}
+      </div>
+    </div>
+  );
+}
+
+// One book's reading for today. The first card is the red feature card; the others are bordered.
+function TodayCard({ ctx, b, featured, onRead, onPlan }) {
+  const { s, plan, entry } = b;
+  const book = entryBook(entry, ctx);
+  const done = bookDoneToday(s);
+  const sched = plan.sched;
+  const d = sched[Math.min(sched.length - 1, plan.doneDays)]; // today, or the next day once today is done
+  const isTime = plan.goalType === 'time';
+  const mins = Math.floor(bookSecsToday(ctx, entry.id) / 60);
+  const read = s.hasPdf ? readInRange(s, d.from, d.to) : 0;
+  const chs = entry.chapters || (PdfStore.id === entry.id ? PdfStore.chapters : null);
+  const ch = chaptersFor(d.from, d.to, chs);
+  const pct = isTime ? Math.min(100, mins / plan.minutes * 100) : Math.min(100, read / Math.max(1, d.count) * 100);
+  const fg = featured ? '#fff' : 'var(--ink)', sub = featured ? 'rgba(255,255,255,0.85)' : 'var(--ink-2)';
+  const btn = (solid) => featured ? featBtn(solid) : {
+    ...featBtn(solid), background: solid ? 'var(--ink)' : 'transparent', color: solid ? 'var(--cream)' : 'var(--ink)', border: solid ? 'none' : '1.5px solid var(--line)',
+  };
+  return (
+    <div key={done ? 'done' : 'open'} style={{ borderRadius: 'var(--card-radius)', background: featured ? 'var(--sage)' : 'var(--surface)', border: featured ? 'none' : '1px solid var(--line)', color: fg, padding: 16, display: 'flex', gap: 16, marginBottom: 12, animation: done ? 'pop .4s cubic-bezier(.2,1.3,.4,1)' : 'none' }}>
+      <button onClick={onPlan} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', borderRadius: 10, outline: featured ? '1.5px dashed rgba(255,255,255,0.6)' : 'none', outlineOffset: 4, alignSelf: 'flex-start', margin: featured ? 4 : 0 }}>
+        <BookCover book={book} w={featured ? 80 : 64} radius={8} style={{ boxShadow: 'none' }} />
+      </button>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: done && !featured ? 'var(--sage)' : sub, fontWeight: done && !featured ? 600 : 400, display: 'flex', alignItems: 'center', gap: 5 }}>
+          {done && <Icon name="check" size={13} stroke={2.6} />}{done ? 'Done for today' : `Today · Day ${plan.day} of ${plan.days}`}
+        </div>
+        <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: featured ? 21 : 18, letterSpacing: -0.3, lineHeight: 1.15, marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          {done ? 'All caught up' : isTime ? `Read ${plan.minutes} minutes` : plan.goalType === 'chapters' && ch ? ch : `Read ${d.count} pages`}
+        </div>
+        <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13, color: sub, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{plan.title} &middot; p. {d.from}&ndash;{d.to}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          <div style={{ flex: 1 }}><ProgressBar value={pct} height={5} track={featured ? 'rgba(255,255,255,0.25)' : 'var(--track-off)'} fill={featured ? '#fff' : 'var(--sage)'} /></div>
+          <span style={{ fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{isTime ? `${mins}/${plan.minutes} min` : `${read}/${d.count}`}</span>
+        </div>
+        {done && <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12, color: sub, marginTop: 5 }}>Day {plan.day} next{isTime ? '' : ` · ${d.count} pages`}{read > 0 ? ' · reading ahead' : ''}</div>}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          <button onClick={onRead} style={btn(true)}>{s.hasPdf ? (done ? 'Read ahead' : read > 0 ? 'Keep reading' : 'Start reading') : 'Log pages'}</button>
+          <button onClick={onPlan} style={btn(false)}>View plan</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Other books: started or paused (continue) and ones saved without a plan (up next)
+function OtherBooks({ go, ctx, lib, skip, openBook }) {
+  const others = lib.filter(e => !skip.has(e.id)).map(e => entryBook(e, ctx));
+  const continuing = others.filter(b => b.status === 'paused' || b.status === 'active');
   const upNext = others.filter(b => b.status === 'unscheduled');
   return (
     <>
@@ -53,129 +147,10 @@ function OtherBooks({ go, ctx, lib, openBook }) {
   );
 }
 
-function TodayEmpty({ go, ctx, account, lib, openBook }) {
-  const finished = ctx.bookId && ctx.finishedAt;
-  return (
-    <div style={SCREEN_PAD}>
-      <TodayHeader go={go} account={account} />
-      {lib.length > 0 && <SearchBar placeholder="Search your library" onClick={() => go('library')} style={{ marginBottom: 16 }} />}
-      <div style={{ borderRadius: 'var(--card-radius)', background: 'var(--sage)', color: '#fff', padding: 20, marginBottom: 12 }}>
-        <div style={{ width: 48, height: 48, borderRadius: 999, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}><Icon name={finished ? 'check' : 'book'} size={24} /></div>
-        <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 21, letterSpacing: -0.3, lineHeight: 1.15 }}>{finished ? 'Book finished. What’s next?' : lib.length ? 'Pick a book to plan' : 'Start your first reading plan'}</div>
-        <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13.5, opacity: 0.85, marginTop: 6, lineHeight: 1.4 }}>Add a PDF or a paper book, set a pace, and Volapace turns it into a few pages a day.</div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          <button onClick={() => go('upload')} style={featBtn(true)}>Add a book</button>
-          {lib.length > 0 && <button onClick={() => go('library')} style={featBtn(false)}>Open library</button>}
-        </div>
-      </div>
-      {doneSet(ctx).size > 0 && <div onClick={() => go('streak')} style={{ cursor: 'pointer' }}><StreakWeek ctx={ctx} style={{ marginBottom: 12 }} /></div>}
-      <OtherBooks go={go} ctx={ctx} lib={lib} openBook={openBook} />
-    </div>
-  );
-}
-
-function TodayPlan({ go, hostRef, ctx = {}, update, account, lib, openBook }) {
-  const plan = planOf(ctx);
-  const cur = currentBook(ctx);
-  const coverBook = cur.book;
-  const GOAL = plan.goal, FROM = plan.from, TO = plan.to;
-  const doneToday = doneSet(ctx).has(dayISO(TODAY));
-  const isTime = plan.goalType === 'time';
-  const minsToday = ctx.timeLog && ctx.timeLog.date === dayISO(TODAY) ? Math.floor(ctx.timeLog.secs / 60) : 0;
-  const [logged, setLogged] = React.useState(() => ctx.hasPdf ? readInRange(ctx, FROM, TO) : 0);
-  const [open, setOpen] = React.useState(false);
-  const [done, setDone] = React.useState(doneToday);
-  const pct = Math.min(100, (logged / GOAL) * 100);
-  const bonus = logged > GOAL;
-  const add = (n) => setLogged(v => Math.max(0, v + n));
-  const initLogged = React.useRef(logged);
-  const complete = () => {
-    setDone(true);
-    update && update({ ...markTodayDone(ctx), page: Math.max(ctx.page || FROM, FROM + logged), logPages: Math.max(0, logged - initLogged.current) });
-    Platform.vibrate([14, 60, 22, 60, 40]);
-    if (hostRef && hostRef.current) fireConfetti(hostRef.current);
-  };
-  const read = () => ctx.hasPdf ? go('reader') : setOpen(true);
-
-  return (
-    <div style={SCREEN_PAD}>
-      <TodayHeader go={go} account={account} />
-
-      <SearchBar placeholder="Search your library" onClick={() => go('library')} style={{ marginBottom: 16 }} />
-
-      {/* Featured: today's read */}
-      <div style={{ borderRadius: 'var(--card-radius)', background: 'var(--sage)', color: '#fff', padding: 16, display: 'flex', gap: 16, marginBottom: 12 }}>
-        <button onClick={() => go('book')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', borderRadius: 10, outline: '1.5px dashed rgba(255,255,255,0.6)', outlineOffset: 4, alignSelf: 'flex-start', margin: 4 }}>
-          <BookCover book={coverBook} w={80} radius={8} style={{ boxShadow: 'none' }} />
-        </button>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, opacity: 0.85 }}>{done ? 'Done for today' : `Today \u00b7 Day ${plan.day} of ${plan.days}`}</div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 21, letterSpacing: -0.3, lineHeight: 1.15, marginTop: 3 }}>{done ? 'All caught up' : isTime ? `Read ${plan.minutes} minutes` : `Read ${GOAL} pages`}</div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13, opacity: 0.85, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{plan.title} &middot; p. {FROM}&ndash;{TO}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-            <div style={{ flex: 1 }}><ProgressBar value={done ? 100 : isTime ? Math.min(100, minsToday / plan.minutes * 100) : pct} height={5} track="rgba(255,255,255,0.25)" fill="#fff" /></div>
-            <span style={{ fontFamily: 'var(--font-ui)', fontSize: 12, fontWeight: 600 }}>{isTime ? `${done ? plan.minutes : minsToday}/${plan.minutes} min` : `${done ? GOAL : logged}/${GOAL}`}</span>
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button onClick={read} style={featBtn(true)}>{done ? (ctx.hasPdf ? 'Read ahead' : 'Log more') : ctx.hasPdf ? 'Start reading' : 'Log pages'}</button>
-            <button onClick={() => go('book')} style={featBtn(false)}>View plan</button>
-          </div>
-        </div>
-      </div>
-
-      {doneSet(ctx).size > 0 && <div onClick={() => go('streak')} style={{ cursor: 'pointer' }}><StreakWeek ctx={ctx} style={{ marginBottom: 12 }} /></div>}
-
-      {open && (
-        <div style={{ borderRadius: 'var(--card-radius)', border: '1px solid var(--line)', background: 'var(--surface)', padding: 18, marginBottom: 12, animation: 'fadeUp .25s cubic-bezier(.2,.8,.2,1)' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-            <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 15.5, color: 'var(--ink)' }}>Log progress</span>
-            <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-ui)', fontSize: 13, color: 'var(--ink-2)' }}>Hide</button>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '16px 0 14px' }}>
-            <BigStep label={'\u2212'} onClick={() => add(-1)} />
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 46, color: 'var(--ink)', lineHeight: 1, letterSpacing: -1.5, fontVariantNumeric: 'tabular-nums' }}>{logged}</div>
-              <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 4 }}>of {GOAL} pages</div>
-            </div>
-            <BigStep label="+" onClick={() => add(1)} />
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-            <Chip onClick={() => add(5)} style={{ flex: 1 }}>+5</Chip>
-            <Chip onClick={() => add(10)} style={{ flex: 1 }}>+10</Chip>
-            <Chip on={logged >= GOAL} onClick={() => setLogged(GOAL)} style={{ flex: 1.4 }}>Reached goal</Chip>
-          </div>
-          {bonus && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 14, background: 'var(--sage-soft)', color: 'var(--sage-deep)', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13.5, marginBottom: 14, animation: 'pop .3s cubic-bezier(.2,1.3,.4,1)' }}>
-              <Icon name="bolt" size={17} /> +{logged - GOAL} pages ahead of schedule
-            </div>
-          )}
-          <Button full icon="check" onClick={complete} disabled={logged === 0}>Mark today complete</Button>
-        </div>
-      )}
-
-      <OtherBooks go={go} ctx={ctx} lib={lib} openBook={openBook} />
-    </div>
-  );
-}
-
 const featBtn = (solid) => ({
   height: 34, padding: '0 14px', borderRadius: 999, cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap',
   background: solid ? '#fff' : 'transparent', color: solid ? 'var(--sage)' : '#fff', border: solid ? 'none' : '1.5px solid rgba(255,255,255,0.8)',
 });
-
-function BigStep({ label, onClick }) {
-  const [press, setPress] = React.useState(false);
-  return (
-    <button onClick={onClick}
-      onPointerDown={() => setPress(true)} onPointerUp={() => setPress(false)} onPointerLeave={() => setPress(false)}
-      style={{
-        width: 54, height: 54, borderRadius: 999, border: '1px solid var(--line)', background: 'var(--fill)',
-        color: 'var(--ink)', fontFamily: 'var(--font-ui)', fontSize: 26, fontWeight: 400, cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
-        transform: press ? 'scale(0.92)' : 'scale(1)', transition: 'transform .12s',
-      }}>{label}</button>
-  );
-}
 
 // ════════════════════════════════════════════════════════════
 // PROGRESS — every figure comes from the local history (stats.jsx)
@@ -293,7 +268,7 @@ function ProgressScreen({ ctx = {}, go, update, openModal, closeModal }) {
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-          {[[sum.books, 'Books finished', 'book'], [sum.pages.toLocaleString(), 'Pages read', 'pages'], [sum.hours, 'Hours reading', 'clock'], [range === 'year' ? life.longest : metDays, range === 'year' ? 'Longest streak' : 'Goal days', 'flame']].map(([n, l, ic]) => (
+          {[[sum.books, 'Books finished', 'bookCheck'], [sum.pages.toLocaleString(), 'Pages read', 'pages'], [sum.hours, 'Hours reading', 'clock'], [range === 'year' ? life.longest : metDays, range === 'year' ? 'Longest streak' : 'Goal days', 'flame']].map(([n, l, ic]) => (
             <div key={l} style={bento}>
               <StatHead icon={ic} label={l} />
               <div style={bigNum}>{n}</div>
@@ -386,4 +361,4 @@ function StatHead({ icon, label }) {
   );
 }
 
-Object.assign(window, { TodayScreen, ProgressScreen, H1, SCREEN_PAD });
+Object.assign(window, { activeBooks, TodayCard, TodayScreen, ProgressScreen, H1, SCREEN_PAD });

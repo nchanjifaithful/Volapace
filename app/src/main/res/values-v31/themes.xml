@@ -1,5 +1,5 @@
 <resources>
-    <!-- Android 12+ system splash: red background, white Volapace mark -->
+    <!-- Android 12+ system splash: plain red; the in-app splash shows the logotype -->
     <style name="Theme.Volapace" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:colorPrimary">#D90429</item>
         <item name="android:colorAccent">#D90429</item>
@@ -9,6 +9,6 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
         <item name="android:windowSplashScreenBackground">#D90429</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
     </style>
 </resources>

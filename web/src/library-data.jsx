@@ -29,14 +29,19 @@ function entryBook(e, ctx = {}) {
   const page = Math.max(0, Math.min(pages || 1, (s.page || 1) - 1));
   const finished = !!(s.finishedAt || e.finishedAt);
   const pct = finished ? 100 : Math.min(100, Math.round((page / Math.max(1, pages)) * 100));
-  const hasPlan = !!s.days;
-  const status = finished ? 'completed' : cur && hasPlan ? 'active' : hasPlan ? 'paused' : 'unscheduled';
+  const planned = !!(s.days && !s.planDraft);
+  const started = (s.readPages || []).length > 0 || (s.page || 1) > 1;
+  // Every book has its own status: a live plan is "Reading" (unless paused), reading without a plan
+  // is "Reading" too, and a book with no plan and no progress is "Saved".
+  const status = finished ? 'completed' : planned ? (s.paused ? 'paused' : 'active') : started ? 'active' : 'unscheduled';
+  const hasPlan = planned;
   const fin = s.finishedAt || e.finishedAt;
   return {
     id: e.id, user: true, entry: e, pdf: !e.paper, paper: !!e.paper, coverImg: e.cover || null,
     title: e.title || 'Untitled', author: e.author || '', pages, page, planPct: pct, status,
     genre: e.paper ? 'Paper book' : 'PDF', cover: coverStyleFor(e.title, e.paper),
-    dayLabel: finished ? (fin ? `Finished ${new Date(fin).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : 'Finished') : hasPlan ? `Day ${Math.min(s.days, (s.doneDays || 0) + 1)} of ${s.days}` : '',
+    dayLabel: finished ? (fin ? `Finished ${new Date(fin).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : 'Finished') : hasPlan ? `Day ${Math.min(s.days, (s.doneDays || 0) + 1)} of ${s.days}` : started ? 'No plan' : '',
+    snap: s, planned: hasPlan,
   };
 }
 

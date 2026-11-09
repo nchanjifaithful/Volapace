@@ -1,8 +1,8 @@
 // app.jsx — Volapace shell: onboarding + 4-tab app, theming, modals, persistence, Android integration
 
 const ACCENT = '#D90429';
-const ONBOARD = ['intro', 'upload', 'scan', 'pace', 'reminders', 'summary', 'welcome'];
-const TABS = ['today', 'progress', 'library', 'you'];
+const ONBOARD = ['intro', 'hello', 'upload', 'scan', 'pace', 'reminders', 'summary', 'welcome'];
+const TABS = ['today', 'progress', 'library', 'notes', 'you'];
 const PUSHED = ['book', 'reader', 'streak'];
 const VALID = [...ONBOARD, ...TABS, ...PUSHED];
 const FULL = ['reader', 'intro', 'welcome', 'streak']; // screens that fill the viewport exactly
@@ -17,7 +17,7 @@ function App() {
     const c = readJSON('vp_ctx', {});
     if (!localStorage.getItem('vp_intro')) return 'intro';
     if (s === 'reader' && !c.hasPdf) return 'today';
-    if (VALID.includes(s) && !['scan', 'pace', 'summary', 'welcome', 'intro'].includes(s) && !(s === 'reminders' && c.planDraft)) return s;
+    if (VALID.includes(s) && !['scan', 'pace', 'summary', 'welcome', 'intro', 'hello'].includes(s) && !(s === 'reminders' && c.planDraft)) return s;
     return Lib.list().length || c.days ? 'today' : 'upload';
   });
   const [themeMode, setThemeMode] = React.useState(() => localStorage.getItem('vp_theme') || 'system');
@@ -26,6 +26,7 @@ function App() {
   const [modal, setModal] = React.useState(null);
   const [splash, setSplash] = React.useState(true);
   const prevRef = React.useRef('today'); // where a pushed screen was opened from
+  const paceFrom = React.useRef('upload'); // where Back on "Choose your pace" goes
   const confettiRef = React.useRef(null);
   const scrollRef = React.useRef(null);
   const ctxRef = React.useRef(ctx); ctxRef.current = ctx;
@@ -63,7 +64,7 @@ function App() {
   };
   const hasAnything = () => Lib.list().length > 0 || !!ctxRef.current.days;
   const back = () => {
-    if (screen === 'pace') navigate(ctx.fromScan ? 'scan' : 'upload');
+    if (screen === 'pace') navigate(paceFrom.current || 'today');
     else if (screen === 'scan') navigate('upload');
     else if (screen === 'upload') navigate(TABS.includes(prevRef.current) ? prevRef.current : 'today');
     else if (screen === 'reminders') navigate(ctx.planDraft ? 'pace' : (TABS.includes(prevRef.current) || prevRef.current === 'book' ? prevRef.current : 'you'));
@@ -72,28 +73,46 @@ function App() {
   const bookBack = () => navigate(screen === 'book' ? (TABS.includes(prevRef.current) ? prevRef.current : 'today') : (prevRef.current || 'today'));
   const update = (data) => setCtx(c => applyHistory(c, data));
 
-  // keep each book's progress snapshot in the library
-  React.useEffect(() => {
-    const e = ctx.bookId ? Lib.get(ctx.bookId) : null;
-    if (e && (!ctx.pages || !e.pages || ctx.pages === e.pages)) Lib.upsert({ id: ctx.bookId, snap: pickBook(ctx), lastOpened: Date.now(), ...(ctx.finishedAt ? { finishedAt: ctx.finishedAt } : {}) });
-  }, [ctx]);
+  // keep each book's progress snapshot in the library (batched, so reading and scrolling stay smooth)
+  const snapT = React.useRef(null);
+  const flushSnap = () => {
+    clearTimeout(snapT.current); snapT.current = null;
+    const c = ctxRef.current; const e = c.bookId ? Lib.get(c.bookId) : null;
+    if (e && (!c.pages || !e.pages || c.pages === e.pages)) Lib.upsert({ id: c.bookId, snap: pickBook(c), lastOpened: Date.now(), ...(c.finishedAt ? { finishedAt: c.finishedAt } : {}) });
+  };
+  React.useEffect(() => { clearTimeout(snapT.current); snapT.current = setTimeout(flushSnap, 500); }, [ctx]);
+  React.useEffect(() => { const f = () => { if (document.visibilityState === 'hidden') flushSnap(); }; document.addEventListener('visibilitychange', f); return () => document.removeEventListener('visibilitychange', f); }, []);
 
   // pick up a better title / author found in the PDF's metadata
   React.useEffect(() => { const fix = () => {
     const c = ctxRef.current; const e = c.bookId && Lib.get(c.bookId);
     if (e && e.metaTitle && (e.title !== c.title || (e.author || '') !== (c.author || ''))) setCtx(x => x.bookId === e.id ? { ...x, title: e.title, author: e.author || '' } : x);
   }; fix(); return Lib.subscribe(fix); }, [ctx.bookId]);
-  const startBook = (data) => { setCtx(c => ({ ...clearBook(c), ...data })); navigate('pace'); };
-  const openBook = (entry, atPage) => {
+  const startBook = (data) => { flushSnap(); paceFrom.current = data.fromScan ? 'scan' : 'upload'; setCtx(c => ({ ...clearBook(c), ...data })); navigate('pace'); };
+  // Make a book the open one. Every book keeps its own pages, plan and notes (its snapshot);
+  // only the streak, settings and history are shared.
+  const selectBook = (entry, extra = {}) => {
     const c = ctxRef.current;
-    if (entry.id === c.bookId) { if (atPage && c.hasPdf) go('reader', { page: atPage }); else go(c.days && !c.planDraft ? 'book' : 'pace'); return; }
-    const snap = entry.snap && entry.snap.days && !entry.snap.planDraft ? entry.snap : null;
-    const base = snap || { pages: entry.pages, title: entry.title, author: entry.author || '', page: 1, doneDays: 0 };
-    setCtx(x => ({ ...clearBook(x), ...base, title: entry.title, author: entry.author || '', hasPdf: !entry.paper, bookId: entry.id, ...(atPage ? { page: atPage } : {}) }));
+    if (entry.id === c.bookId) { if (Object.keys(extra).length) setCtx(x => ({ ...x, ...extra })); return; }
+    flushSnap();
+    const snap = { ...(entry.snap || {}) };
+    if (snap.planDraft) { delete snap.days; delete snap.planDraft; delete snap.planDays; } // an unfinished setup isn't a plan
+    const base = { pages: entry.pages || snap.pages, page: 1, doneDays: 0, ...snap };
+    setCtx(x => ({ ...clearBook(x), ...base, title: entry.title, author: entry.author || '', hasPdf: !entry.paper, bookId: entry.id, ...extra }));
     if (!entry.paper) PdfStore.openId(entry.id).catch(() => {});
-    if (atPage && !entry.paper) { prevRef.current = TABS.includes(screen) ? screen : 'library'; navigate('reader'); }
-    else if (snap) { prevRef.current = TABS.includes(screen) ? screen : 'library'; navigate('book'); } else navigate('pace');
   };
+  // openBook(entry)            -> the book's page (its plan, or reading without one)
+  // openBook(entry, page)      -> the reader at that page
+  // openBook(entry, 0, 'reader' | 'pace')
+  const openBook = (entry, atPage, to) => {
+    selectBook(entry, atPage ? { page: atPage } : {});
+    const target = to || (atPage ? 'reader' : 'book');
+    const from = TABS.includes(screen) || screen === 'book' ? screen : 'library';
+    if (target === 'pace') { paceFrom.current = from; navigate('pace'); return; }
+    prevRef.current = from === 'book' && target === 'book' ? 'today' : from;
+    navigate(target === 'reader' && entry.paper ? 'book' : target);
+  };
+  const planBook = () => { paceFrom.current = screen === 'book' ? 'book' : TABS.includes(screen) ? screen : 'today'; navigate('pace'); };
   const forget = () => setCtx(c => clearBook(c)); // current book was removed
   const jump = (s) => navigate(s);
   const restart = () => { setCtx(c => clearBook(c)); navigate('upload'); };
@@ -123,12 +142,15 @@ function App() {
 
   // ── reminders (local notifications, scheduled by the Android shell) ──
   React.useEffect(() => {
-    const n = notifyOf(ctx), q = quietOf(ctx), plan = planOf(ctx);
-    const hasPlan = !!(ctx.bookId && ctx.days && !ctx.finishedAt && !ctx.planDraft);
-    const text = hasPlan ? (plan.goalType === 'time' ? `Read ${plan.minutes} minutes of ${plan.title} today.` : `Read pages ${plan.from}–${plan.to} of ${plan.title} today.`) : 'A few pages a day adds up. Pick up where you left off.';
+    const n = notifyOf(ctx), q = quietOf(ctx);
+    const active = activeBooks(ctx);
+    const first = active[0];
+    const text = !first ? 'A few pages a day adds up. Pick up where you left off.'
+      : (first.plan.goalType === 'time' ? `Read ${first.plan.minutes} minutes of ${first.plan.title}` : `Read pages ${first.plan.from}–${first.plan.to} of ${first.plan.title}`) + (active.length > 1 ? `, plus ${active.length - 1} more book${active.length > 2 ? 's' : ''}.` : ' today.');
     const done = [...doneSet(ctx)].sort();
-    Platform.setReminder({ on: !!n.on && (hasPlan || Lib.list().length > 0), time: n.time, rescueTime: n.rescueTime, rescue: !!n.rescue && streakCount(doneSet(ctx)) > 0, text,
+    Platform.setReminder({ on: !!n.on && (active.length > 0 || Lib.list().length > 0), time: n.time, rescueTime: n.rescueTime, rescue: !!n.rescue && streakCount(doneSet(ctx)) > 0, text,
       lastDone: done[done.length - 1] || '', quiet: q.on ? { from: q.from, to: q.to, days: Object.keys(q.days).filter(d => q.days[d]) } : null });
+    Platform.setWidget({ days: done.slice(-400), book: first ? first.plan.title : '' });
   }, [ctx.notify, ctx.quiet, ctx.doneDates, ctx.bookId, ctx.days, ctx.doneDays, ctx.finishedAt]);
 
   // ── Android back button ──
@@ -137,6 +159,7 @@ function App() {
     if (PUSHED.includes(screen)) { bookBack(); return true; }
     if (['pace', 'scan', 'reminders', 'summary'].includes(screen)) { back(); return true; }
     if (screen === 'welcome') { navigate('today'); return true; }
+    if (screen === 'hello') { navigate('intro'); return true; }
     if (screen === 'upload' && hasAnything()) { back(); return true; }
     if (TABS.includes(screen) && screen !== 'today') { navigate('today'); return true; }
     return false;
@@ -144,19 +167,22 @@ function App() {
 
   const renderScreen = () => {
     switch (screen) {
-      case 'intro':    return <IntroScreen onDone={() => { try { localStorage.setItem('vp_intro', '1'); } catch (e) {} navigate(hasAnything() ? 'today' : 'upload'); }} />;
+      case 'intro':    return <IntroScreen onDone={() => navigate('hello')} />;
+      case 'hello':    return <HelloScreen account={account} onBack={() => navigate('intro')} onDone={(a) => { setAccount({ ...account, ...a }); try { localStorage.setItem('vp_intro', '1'); } catch (e) {} navigate(hasAnything() ? 'today' : 'upload'); }} />;
       case 'reminders': return <RemindersScreen ctx={ctx} update={update} go={go} back={back} onboarding={!!ctx.planDraft} />;
       case 'summary':  return <SummaryScreen ctx={ctx} update={update} go={go} back={back} />;
       case 'welcome':  return <WelcomeScreen ctx={ctx} go={(s) => { prevRef.current = 'today'; navigate(s); }} hostRef={confettiRef} />;
       case 'upload':   return <UploadScreen go={go} startBook={startBook} openBook={openBook} onClose={hasAnything() ? back : null} />;
       case 'scan':     return <ScanScreen go={go} back={back} ctx={ctx} startBook={startBook} />;
-      case 'pace':     return <PaceScreen go={go} back={back} ctx={ctx} openModal={openModal} closeModal={closeModal} />;
+      case 'pace':     return <PaceScreen go={go} back={back} ctx={ctx} update={update} openModal={openModal} closeModal={closeModal} account={account} />;
       case 'today':    return <TodayScreen go={go} hostRef={confettiRef} ctx={ctx} update={update} account={account} openBook={openBook} />;
+
       case 'progress': return <ProgressScreen ctx={ctx} go={go} update={update} openModal={openModal} closeModal={closeModal} />;
       case 'streak':   return <StreakScreen ctx={ctx} onBack={bookBack} />;
       case 'library':  return <LibraryScreen go={go} ctx={ctx} openBook={openBook} forget={forget} openModal={openModal} closeModal={closeModal} />;
+      case 'notes':    return <NotesScreen ctx={ctx} openBook={openBook} />;
       case 'you':      return <YouScreen go={go} theme={themeMode} setTheme={setThemeMode} openModal={openModal} closeModal={closeModal} account={account} setAccount={setAccount} ctx={ctx} update={update} />;
-      case 'book':     return ctx.days && !ctx.planDraft ? <PlanScreen key={(ctx.bookId || 's') + ':' + (ctx.planVer || 0)} openModal={openModal} closeModal={closeModal} ctx={ctx} update={update} go={go} restart={restart} hostRef={confettiRef} onBack={bookBack} /> : <TodayScreen go={go} hostRef={confettiRef} ctx={ctx} update={update} account={account} openBook={openBook} />;
+      case 'book':     return <PlanScreen key={(ctx.bookId || 's') + ':' + (ctx.planVer || 0)} openModal={openModal} closeModal={closeModal} ctx={ctx} update={update} go={go} restart={restart} hostRef={confettiRef} onBack={bookBack} planBook={planBook} onRemoved={() => { forget(); navigate(TABS.includes(prevRef.current) ? prevRef.current : 'library'); }} />;
       case 'reader':   return <ReaderScreen key={ctx.bookId || 'r'} ctx={ctx} update={update} hostRef={confettiRef} onBack={bookBack} />;
       default:         return null;
     }

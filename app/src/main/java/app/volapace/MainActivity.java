@@ -40,12 +40,12 @@ import java.util.concurrent.Executors;
  */
 public class MainActivity extends Activity {
     static final String ORIGIN = "https://volapace.local/";
-    private static final int REQ_PICK = 11, REQ_SAVE = 12, REQ_NOTIFY = 13, REQ_IMAGE = 14, REQ_STORAGE = 15;
+    private static final int REQ_PICK = 11, REQ_SAVE = 12, REQ_NOTIFY = 13, REQ_IMAGE = 14, REQ_STORAGE = 15, REQ_TEXT = 16;
 
     ReaderWebView web;
     Library library;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private String pickCb, saveCb, imageCb;
+    private String pickCb, saveCb, imageCb, textCb;
     private byte[] saveData;
     private String incoming;           // JSON of a book handed over by another app, until the UI takes it
     private boolean dark, askedNotify;
@@ -208,6 +208,12 @@ public class MainActivity extends Activity {
             io.execute(() -> resolve(cb, squarePhoto(uri)));
             return;
         }
+        if (req == REQ_TEXT) {
+            String cb = textCb; textCb = null;
+            if (uri == null) { resolve(cb, null); return; }
+            io.execute(() -> resolve(cb, readText(uri)));
+            return;
+        }
         if (req == REQ_PICK) {
             String cb = pickCb; pickCb = null;
             if (uri == null) { resolve(cb, null); return; }
@@ -221,6 +227,27 @@ public class MainActivity extends Activity {
                 resolve(cb, ok ? "true" : "false");
             });
         }
+    }
+
+    // ── import: a CSV or JSON export picked from Files, handed to the UI as text ──
+    void pickText(String cb) {
+        if (textCb != null) resolve(textCb, null);
+        textCb = cb;
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                .putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"text/csv", "text/comma-separated-values", "text/plain", "application/json", "application/octet-stream"});
+        try { startActivityForResult(i, REQ_TEXT); } catch (Exception e) { resolve(cb, null); textCb = null; }
+    }
+    private String readText(Uri uri) {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[16384]; int n; long total = 0;
+            while ((n = in.read(buf)) > 0) { bo.write(buf, 0, n); total += n; if (total > 20_000_000) break; }
+            String name = "";
+            try (android.database.Cursor c = getContentResolver().query(uri, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (c != null && c.moveToFirst()) name = c.getString(0);
+            } catch (Exception ignored) {}
+            return new JSONObject().put("name", name == null ? "" : name).put("text", bo.toString("UTF-8")).toString();
+        } catch (Exception e) { return "{\"error\":\"unreadable\"}"; }
     }
 
     // ── profile photo: picked from the gallery, cropped to a 256 px square on the phone ──

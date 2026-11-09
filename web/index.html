@@ -41,7 +41,8 @@ a{color:var(--sage)}
 @keyframes fadeUpIn { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes introIn { from { transform: translateX(28px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes floaty { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-10px) rotate(2deg); } }
-@keyframes hitPulse { 0% { box-shadow: 0 0 0 0 rgba(217,4,41,.55); } 100% { box-shadow: 0 0 0 10px rgba(217,4,41,0); } }
+@keyframes hitPulse { 0% { box-shadow: 0 0 0 0 rgba(229,160,0,.35); } 100% { box-shadow: 0 0 0 6px rgba(229,160,0,0); } }
+@keyframes tapFx { 0% { transform: scale(0.4); opacity: 0; } 30% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.15); opacity: 0; } }
 .textLayer{position:absolute;inset:0;overflow:hidden;line-height:1;text-size-adjust:none;-webkit-text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;z-index:2;-webkit-user-select:text;user-select:text}
 .textLayer span,.textLayer br{color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0% 0%}
 .textLayer .endOfContent{display:block;position:absolute;inset:100% 0 0;z-index:-1;cursor:default;user-select:none}

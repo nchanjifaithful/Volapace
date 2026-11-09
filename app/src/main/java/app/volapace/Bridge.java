@@ -93,6 +93,8 @@ final class Bridge {
     }
 
     @JavascriptInterface public void setSelectionTools(boolean on) { act.web.selectionTools = on; }
+    @JavascriptInterface public void pickText(String cb) { act.runOnUiThread(() -> act.pickText(cb)); }
+    @JavascriptInterface public void setWidget(String json) { StreakWidget.save(act, json); }
     @JavascriptInterface public void pickImage(String cb) { act.runOnUiThread(() -> act.pickImage(cb)); }
     @JavascriptInterface public String folderInfo() {
         try {

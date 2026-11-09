@@ -59,6 +59,8 @@ app/src/main/java/app/volapace/
   ReaderWebView.java    Adds Highlight / Note to Android's text-selection menu while the reader is open.
   Reminders.java        AlarmManager + local notifications: daily reminder, streak rescue, quiet hours.
                         Receivers: ReminderReceiver, BootReceiver. ShareProvider serves files to the share sheet.
+  StreakWidget.java     Home-screen streak widget (layout/widget_streak.xml). The UI sends the goal days via
+                        setWidget(); the widget computes the streak against the phone's date.
 web/src/ (load order is in build.mjs — the files share globals, as in the prototype; no imports)
   platform.jsx          JS side of the bridge + browser fallback. Defines TODAY (real local date).
   theme.jsx, logo.jsx   Design atoms and icons; the logo (flat colours, no gradients) and <Brand>.
@@ -68,15 +70,19 @@ web/src/ (load order is in build.mjs — the files share globals, as in the prot
   reader-view.jsx       The reader: paging/vertical scroll, pinch + double-tap zoom, page ticks, day-end
                         markers, persistent search with on-page hits, ⋮ menu, notes, timer.
   stats.jsx             applyHistory() (reading log), lifetimeStats, rangeStats (calendar weeks/months).
-  screens1–5.jsx        Upload/paper book, Pace, Plan, Today/Progress, Library/Profile and sheets.
-  onboarding.jsx        Splash, intro, reminders & rest days, summary, welcome animation.
+  screens1–5.jsx        Upload/paper book, Pace (incl. chapters a day), Plan/book page (⋮ quick actions),
+                        Today (one card per active book)/Progress, Library/Profile, sheets, CSV/JSON import.
+  notes.jsx             Notes tab: highlights, notes and bookmarks across books.
+  onboarding.jsx        Splash, intro, name & reader type, reminders & rest days, summary, welcome animation.
   streak.jsx            Streak screen and share card (DOM preview + canvas PNG).
   shell.jsx, app.jsx    Full-screen shell, routing, persistence, reminders sync, FAB, back button.
 ```
 
 ## How state works
 
-- One `ctx` object (localStorage `vp_ctx`) holds the current book plus global state. Per-book keys are listed in `BOOK_FIELDS`. When you switch books they're snapshotted into the library entry (`Lib`, localStorage `vp_lib`). **Any new per-book field must be added to `BOOK_FIELDS`.**
+- One `ctx` object (localStorage `vp_ctx`) holds the open book plus global state. Per-book keys are listed in `BOOK_FIELDS`. When you switch books they're snapshotted into the library entry (`Lib`, localStorage `vp_lib`; the snapshot is batched, see `flushSnap` in app.jsx). **Any new per-book field must be added to `BOOK_FIELDS`.** Screens that show several books (Today, Notes, Library) read other books from `entry.snap`.
+- Each book has its own day: `bookDoneToday(s)` (per-book `bookDates`). The streak is global: `doneDates`, with `doneBooks[iso]` = the books read that day. A plan is live when `hasPlan(s)` (days set, not a draft); `paused` takes it off Today. Books without a plan can still be read; ticking pages counts toward the streak.
+- Pages read are counted once per page per book (`countedPages`), the first time a page is ticked. Reader time is logged per book in `log[day].k[bookId]`.
 - Every change goes through `update(data)` → `applyHistory()`, which also writes the reading log (`ctx.log`), page deltas, sessions and finished books. Special keys: `logPages`, `endSession`.
 - The plan is derived, never stored as screen state: `planSchedule(ctx)` builds the days from `days`, `doneDays`, `planDays` (`counts`, `skipped`) and `planVer`. `markTodayDone()` advances `doneDays` and adds today to `doneDates`.
 - Pages ticked as read: `ctx.readPages`. Rest days: `ctx.restDays` (array of weekday numbers; older plans used `catchUp`). New plans are drafts (`planDraft`) until Summary → Start.
@@ -96,7 +102,9 @@ web/src/ (load order is in build.mjs — the files share globals, as in the prot
 - Screens that fill the viewport exactly (reader, intro, welcome, streak) are listed in `FULL` in `app.jsx`.
 - Use `var(--sat)` / `var(--sab)` for top and bottom spacing, not fixed iPhone values.
 - To test PDFs in the browser, put a generated PDF into IndexedDB `volapace-dev`/`files` and call `window.__vp.library()`.
-- Never tested on a real phone yet: All-files-access folder move, Check for updates, the Highlight/Note selection menu.
+- Never tested on a real phone yet: All-files-access folder move, Check for updates, the Highlight/Note selection menu, the streak widget, Import from a file.
+- The Write/Edit tools turn `’`-style escapes into real characters. That's fine in new code, but exact-match edits of existing lines that contain escapes need the escaped form.
+
 
 # Design handoff (original requirements)
 

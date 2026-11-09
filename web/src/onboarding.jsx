@@ -80,6 +80,46 @@ function IntroScreen({ onDone }) {
   );
 }
 
+// ── Hello: your name and what kind of reader you are (after the intro) ──
+const READER_TYPES = [
+  { k: 'first', label: 'First-timer', sub: 'Building a reading habit', icon: 'sparkle', mode: 'scholar' },
+  { k: 'casual', label: 'Casual reader', sub: 'A book now and then', icon: 'clock', mode: 'casual' },
+  { k: 'avid', label: 'Avid reader', sub: 'Always mid-book', icon: 'flame', mode: 'sprinter' },
+  { k: 'student', label: 'Student / researcher', sub: 'Papers, guides and set texts', icon: 'pages', mode: 'casual' },
+];
+function HelloScreen({ account = {}, onDone, onBack }) {
+  const [name, setName] = React.useState(account.name || '');
+  const [type, setType] = React.useState(account.readerType || '');
+  const done = () => onDone({ name: name.trim(), ...(type ? { readerType: type } : {}) });
+  return (
+    <div style={{ minHeight: '100%', padding: 'calc(var(--sat) + 16px) 22px calc(var(--sab) + 28px)', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+      <ScreenTop back={onBack} step="About you" title="Nice to meet you" sub="Volapace keeps this on your phone. It just makes the app feel like yours."
+        right={<button onClick={() => onDone({})} style={{ background: 'none', border: 'none', color: 'var(--ink-2)', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 15, cursor: 'pointer', padding: 8 }}>Skip</button>} />
+      <label style={{ display: 'block', padding: '10px 14px', borderRadius: 14, background: 'var(--fill)', border: '1px solid var(--line)', marginBottom: 22 }}>
+        <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12, color: 'var(--ink-2)' }}>What should we call you?</div>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="given-name" autoCapitalize="words" onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+          style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', padding: '3px 0 0', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 17, color: 'var(--ink)' }} />
+      </label>
+      <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)', margin: '0 4px 8px', textTransform: 'uppercase', letterSpacing: 0.6 }}>What kind of reader are you?</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 22 }}>
+        {READER_TYPES.map(t => {
+          const on = type === t.k;
+          return (
+            <button key={t.k} onClick={() => setType(on ? '' : t.k)} style={{ padding: '14px 12px', borderRadius: 16, cursor: 'pointer', textAlign: 'left',
+              background: on ? 'var(--ink)' : 'var(--fill)', color: on ? 'var(--cream)' : 'var(--ink)', border: on ? '1px solid var(--ink)' : '1px solid var(--line)', transition: 'all .15s' }}>
+              <Icon name={t.icon} size={20} />
+              <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 14.5, marginTop: 10 }}>{t.label}</div>
+              <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12, opacity: 0.7, marginTop: 2, lineHeight: 1.3 }}>{t.sub}</div>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ flex: 1 }} />
+      <Button full icon="arrowRight" onClick={done}>{name.trim() ? `Continue as ${name.trim().split(/\s+/)[0]}` : 'Continue'}</Button>
+    </div>
+  );
+}
+
 // ── Quiet hours: a real two-handle slider over the 24-hour day (15-minute steps) ──
 const toMin = (hm) => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
 const toHM = (n) => { n = ((Math.round(n / 15) * 15) % 1440 + 1440) % 1440; return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`; };
@@ -283,7 +323,7 @@ function SummaryScreen({ ctx, update, go, back }) {
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 14, background: i === 0 ? 'var(--sage-soft)' : 'var(--fill)', border: i === 0 ? '1px solid var(--sage-ring)' : '1px solid transparent' }}>
             <span style={{ width: 52, fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: 13, color: i === 0 ? 'var(--sage-deep)' : 'var(--ink)' }}>{i === 0 ? 'Today' : `${WDAYS[dayDate(i).getDay()]} ${dayDate(i).getDate()}`}</span>
             <span style={{ flex: 1, fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)' }}>Day {i + 1} &middot; p. {d.from}&ndash;{d.to}</span>
-            <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>{d.count} pages</span>
+            <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>{d.count} page{d.count === 1 ? '' : 's'}</span>
           </div>
         ))}
       </div>
@@ -348,4 +388,4 @@ function WelcomeScreen({ ctx, go, hostRef }) {
   );
 }
 
-Object.assign(window, { AppSplash, IntroScreen, RemindersScreen, SummaryScreen, WelcomeScreen, QuietSlider, RestDaysPicker, ScreenTop, Group, Row });
+Object.assign(window, { HelloScreen, READER_TYPES, AppSplash, IntroScreen, RemindersScreen, SummaryScreen, WelcomeScreen, QuietSlider, RestDaysPicker, ScreenTop, Group, Row });

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Streak widget: flat red card, same as the streak card in the app -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#D90429" />
+    <corners android:radius="22dp" />
+</shape>

@@ -56,8 +56,11 @@ function NumField({ value, onChange, min, max, suffix }) {
   );
 }
 
-function PaceScreen({ go, back, ctx, openModal, closeModal }) {
+function PaceScreen({ go, back, ctx, update, openModal, closeModal, account = {} }) {
   const total = ctx.pages || 1;
+  const allChs = useChapters();
+  React.useEffect(() => { if (ctx.hasPdf && ctx.bookId && PdfStore.id !== ctx.bookId) PdfStore.openId(ctx.bookId).catch(() => {}); }, [ctx.bookId]);
+  const chs = ctx.hasPdf && PdfStore.id === ctx.bookId ? allChs : [];
   const [startP, setStartP] = React.useState(1);
   const [endP, setEndP] = React.useState(total);
   const [extra, setExtra] = React.useState([]);
@@ -65,9 +68,11 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
   const skip = React.useMemo(() => [...new Set([...locked, ...extra])].sort((a, b) => a - b), [locked, extra]);
   const pages = Math.max(1, total - skip.length);
   const openPicker = () => openModal(<PagePicker total={total} initial={extra.filter(p => !locked.has(p))} locked={locked} onDone={setExtra} close={closeModal} />);
-  const [mode, setMode] = React.useState('casual');
+  const rt = (typeof READER_TYPES !== 'undefined' && READER_TYPES.find(t => t.k === account.readerType)) || null;
+  const [mode, setMode] = React.useState(rt ? rt.mode : 'casual');
   const [basis, setBasis] = React.useState('deadline');
-  const [days, setDays] = React.useState(14);
+  const [days, setDays] = React.useState(rt ? MODES[rt.mode].days : 14);
+  const [cpd, setCpd] = React.useState(1);
   const [ppd, setPpd] = React.useState(16);
   const [mins, setMins] = React.useState(20);
 
@@ -76,8 +81,12 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
 
   const pickMode = (m) => { setMode(m); const d = MODES[m].days; setDays(d); setPpd(Math.ceil(pages / d)); setBasis('deadline'); };
   const timePpd = Math.max(1, Math.round(mins * PAGES_PER_HOUR / 60));
-  const effDays = basis === 'deadline' ? days : basis === 'time' ? Math.max(1, Math.ceil(pages / timePpd)) : Math.max(1, Math.ceil(pages / ppd));
-  const effPpd = basis === 'deadline' ? Math.ceil(pages / days) : basis === 'time' ? timePpd : ppd;
+  // chapter plans: each day starts on a chapter's first page
+  const readList = React.useMemo(() => { const ex = new Set(skip); const l = []; for (let p = 1; p <= total; p++) if (!ex.has(p)) l.push(p); return l.length ? l : [1]; }, [skip, total]);
+  const chCounts = React.useMemo(() => basis === 'chapters' ? chapterCounts(readList, chs, cpd) : null, [basis, readList, chs, cpd]);
+  const nCh = chs.filter(c => c.page >= readList[0] && c.page <= readList[readList.length - 1]).length;
+  const effDays = basis === 'chapters' && chCounts ? chCounts.length : basis === 'deadline' ? days : basis === 'time' ? Math.max(1, Math.ceil(pages / timePpd)) : Math.max(1, Math.ceil(pages / ppd));
+  const effPpd = basis === 'chapters' && chCounts ? Math.ceil(pages / chCounts.length) : basis === 'deadline' ? Math.ceil(pages / days) : basis === 'time' ? timePpd : ppd;
   const finish = addReadingDays(TODAY, Math.max(0, effDays - 1), rest);
   const setD = (v) => { setDays(v); setMode('custom'); };
   const setP = (v) => { setPpd(v); setMode('custom'); };
@@ -116,13 +125,19 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
 
       <div style={{ padding: 18, borderRadius: 'var(--card-radius)', border: '1px solid var(--line)', marginBottom: 12 }}>
         <div style={{ display: 'flex', padding: 3, borderRadius: 999, background: 'var(--fill)', marginBottom: 18 }}>
-          {[['deadline', 'Deadline'], ['effort', 'Pages a day'], ['time', 'Time a day']].map(([k, l]) => (
+          {[['deadline', 'Deadline'], ['effort', 'Pages'], ['time', 'Time'], ...(chs.length >= 2 ? [['chapters', 'Chapters']] : [])].map(([k, l]) => (
             <button key={k} onClick={() => setBasis(k)} style={{ flex: 1, height: 36, borderRadius: 999, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: basis === k ? 600 : 500, fontSize: 14,
               background: basis === k ? 'var(--ink)' : 'transparent', color: basis === k ? 'var(--cream)' : 'var(--ink-2)', transition: 'all .15s' }}>{l}</button>
           ))}
         </div>
 
-        {basis === 'time' ? (
+        {basis === 'chapters' ? (
+          <>
+            <div style={label}>Chapters each day</div>
+            <NumField value={cpd} onChange={setCpd} min={1} max={Math.max(1, Math.min(20, nCh))} suffix={cpd === 1 ? 'chapter' : 'chapters'} />
+            <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 10, lineHeight: 1.4 }}>{nCh} chapters found in this PDF. Each day starts at the beginning of a chapter, so you never stop mid-chapter.</div>
+          </>
+        ) : basis === 'time' ? (
           <>
             <div style={label}>Read each day for</div>
             <NumField value={mins} onChange={setM} min={5} max={240} suffix="min" />
@@ -146,12 +161,12 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
           </>
         )}
 
-        <div style={{ position: 'relative', height: 30, display: 'flex', alignItems: 'center', marginTop: 16 }}>
+        {basis !== 'chapters' && <div style={{ position: 'relative', height: 30, display: 'flex', alignItems: 'center', marginTop: 16 }}>
           <div style={{ position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 999, background: 'var(--track-off)' }} />
           <div style={{ position: 'absolute', left: 0, width: `${pct}%`, height: 4, borderRadius: 999, background: 'var(--ink)' }} />
           <input type="range" min={sliderMin} max={sliderMax} value={Math.min(sliderVal, sliderMax)} onChange={e => basis === 'deadline' ? setD(+e.target.value) : basis === 'time' ? setM(+e.target.value) : setP(+e.target.value)}
             className="vol-slider" style={{ position: 'absolute', left: 0, right: 0, width: '100%', margin: 0 }} />
-        </div>
+        </div>}
       </div>
 
       <div style={{ padding: 18, borderRadius: 'var(--card-radius)', border: '1px solid var(--line)', marginBottom: 12 }}>
@@ -175,15 +190,19 @@ function PaceScreen({ go, back, ctx, openModal, closeModal }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 18, borderRadius: 'var(--card-radius)', background: 'var(--sage)', color: '#fff', marginBottom: 12 }}>
         <Icon name="target" size={24} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13, opacity: 0.85 }}>{basis === 'time' ? `${mins} min (~${effPpd} pages) a day` : `${effPpd} pages a day`} &middot; {effDays} reading days</div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13, opacity: 0.85 }}>{basis === 'time' ? `${mins} min (~${effPpd} pages) a day` : basis === 'chapters' ? `${cpd} chapter${cpd === 1 ? '' : 's'} (~${effPpd} pages) a day` : `${effPpd} pages a day`} &middot; {effDays} reading days</div>
           <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 19, marginTop: 2, letterSpacing: -0.3 }}>Done by {fmtDate(finish)}</div>
         </div>
       </div>
 
       <div style={{ fontFamily: 'var(--font-ui)', fontSize: 12.5, color: 'var(--ink-2)', textAlign: 'center', margin: '4px 0 14px' }}>{REST_LABEL(rest)} &middot; you can change rest days next</div>
-      <Button full icon="arrowRight" onClick={() => go('reminders', { pages: total, skip, doneDays: 0, page: startP, goalType: basis === 'time' ? 'time' : 'pages', minutes: mins, highlights: ctx.highlights || [], bookmarks: ctx.bookmarks || [], days: effDays, ppd: effPpd, mode: mode === 'custom' ? 'Custom' : MODES[mode].label, restDays: rest, planStart: 0, planVer: (ctx.planVer || 0) + 1, planDays: null, finishedAt: null, readPages: [], planDraft: true, planStartDate: dayISO(TODAY) })}>
+      <Button full icon="arrowRight" onClick={() => { const ver = (ctx.planVer || 0) + 1; go('reminders', { pages: total, skip, doneDays: 0, page: Math.max(startP, ctx.page || 1), goalType: basis === 'time' ? 'time' : basis === 'chapters' && chCounts ? 'chapters' : 'pages', chPerDay: cpd, minutes: mins, highlights: ctx.highlights || [], bookmarks: ctx.bookmarks || [], days: effDays, ppd: effPpd, mode: basis === 'chapters' ? 'Chapter' : mode === 'custom' ? 'Custom' : MODES[mode].label, restDays: rest, planStart: 0, planVer: ver, planDays: basis === 'chapters' && chCounts ? { ver, counts: chCounts, skipped: [] } : null, finishedAt: null, paused: false, readPages: ctx.readPages || [], dayDates: {}, planDraft: true, planStartDate: dayISO(TODAY) }); }}>
         Next: reminders
       </Button>
+      <button onClick={() => go(ctx.hasPdf ? 'reader' : 'book')} style={{ width: '100%', marginTop: 10, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 14, color: 'var(--ink-2)', padding: 8 }}>
+        Just read, no plan
+      </button>
+
     </div>
   );
 }

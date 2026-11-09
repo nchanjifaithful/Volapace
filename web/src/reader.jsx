@@ -8,6 +8,16 @@ function loadPdfJs() {
   return Promise.resolve(lib);
 }
 
+// Options for every document. The URLs must be absolute: pdf.js fetches the standard fonts from its
+// worker, which would resolve a relative path against vendor/pdf.worker.min.js (vendor/vendor/…, a 404).
+// Without those fonts, PDFs that don't embed Times / Arial / Courier (Word exports often don't) were
+// drawn with whatever the phone has, squeezed into the original widths: cramped, illegible text.
+const PDF_OPTS = {
+  isEvalSupported: false, cMapPacked: true, useSystemFonts: false,
+  cMapUrl: new URL('vendor/cmaps/', location.href).href,
+  standardFontDataUrl: new URL('vendor/standard_fonts/', location.href).href,
+};
+
 // ── On-device library ─────────────────────────────────────────
 // The source of truth is the Volapace folder on the phone. The native side indexes it
 // (content hash id, page count, cover thumbnail) and we merge that index with each book's
@@ -18,6 +28,9 @@ const Lib = {
   save(list) { this._l = list; try { localStorage.setItem('vp_lib', JSON.stringify(list)); } catch (e) {} this.subs.forEach(fn => fn()); },
   subscribe(fn) { this.subs.add(fn); return () => this.subs.delete(fn); },
   get(id) { return this.list().find(b => b.id === id) || null; },
+  // books shown in the app ("Remove from library only" hides an entry but keeps its file)
+  visible() { return this.list().filter(b => !b.hidden); },
+  hide(id) { const l = this.list().map(b => b.id === id ? { ...b, hidden: true } : b); this.save(l); },
   heal() { const l = this.list(); let ch = false; l.forEach(e => { if (e.snap && e.snap.pages && e.pages && e.snap.pages !== e.pages) { delete e.snap; ch = true; } }); if (ch) this.save([...l]); },
   upsert(entry) { const l = [...this.list()]; const i = l.findIndex(b => b.id === entry.id); if (i >= 0) l[i] = { ...l[i], ...entry }; else l.unshift(entry); this.save(l); },
   async remove(id) {
@@ -36,7 +49,7 @@ const Lib = {
       seen.add(f.id);
       const old = byId.get(f.id);
       const cover = Platform.coverUrl(f);
-      if (!old) { next.push({ id: f.id, file: f.name, title: f.title || f.name.replace(/\.pdf$/i, ''), author: '', pages: f.pages || 0, cover, addedAt: f.added || f.mtime || Date.now() }); changed = true; continue; }
+      if (!old) { next.push(applyImported({ id: f.id, file: f.name, title: f.title || f.name.replace(/\.pdf$/i, ''), author: '', pages: f.pages || 0, cover, addedAt: f.added || f.mtime || Date.now() })); changed = true; continue; }
       const upd = { ...old };
       if (old.file !== f.name) { upd.file = f.name; if (!old.metaTitle) upd.title = f.title || old.title; changed = true; }
       if (f.pages && old.pages !== f.pages) { upd.pages = f.pages; changed = true; }
@@ -53,11 +66,24 @@ const Lib = {
 function useLib() {
   const [, set] = React.useState(0);
   React.useEffect(() => Lib.subscribe(() => set(t => t + 1)), []);
-  return Lib.list();
+  return Lib.visible();
+}
+
+// Progress imported from an export for books that aren't on this phone yet. When a PDF with the same
+// title shows up in the folder, it picks up that progress.
+const normTitle = (t) => String(t || '').toLowerCase().replace(/\.pdf$/, '').replace(/[^a-z0-9]+/g, ' ').trim();
+function applyImported(entry) {
+  let pend; try { pend = JSON.parse(localStorage.getItem('vp_import')) || {}; } catch { pend = {}; }
+  const k = normTitle(entry.title), k2 = normTitle(entry.file);
+  const hit = pend[k] || pend[k2];
+  if (!hit) return entry;
+  delete pend[k]; delete pend[k2];
+  try { localStorage.setItem('vp_import', JSON.stringify(pend)); } catch (e) {}
+  return { ...entry, snap: { ...hit, pages: entry.pages || hit.pages } };
 }
 
 // Fields that belong to one book (swapped in/out when you switch books)
-const BOOK_FIELDS = ['readPages', 'dayDates', 'restDays', 'planDraft', 'planStartDate', 'searchState', 'fromScan', 'planStart', 'planVer', 'bookId', 'title', 'author', 'pages', 'hasPdf', 'page', 'skip', 'days', 'ppd', 'doneDays', 'mode', 'time', 'remindOn', 'catchUp', 'bookmarks', 'highlights', 'goalType', 'minutes', 'planDays', 'finishedAt', 'pageLook', 'scrollMode', 'vSnap', 'readerZoom'];
+const BOOK_FIELDS = ['bookDates', 'paused', 'chPerDay', 'countedPages', 'readPages', 'dayDates', 'restDays', 'planDraft', 'planStartDate', 'searchState', 'fromScan', 'planStart', 'planVer', 'bookId', 'title', 'author', 'pages', 'hasPdf', 'page', 'skip', 'days', 'ppd', 'doneDays', 'mode', 'time', 'remindOn', 'catchUp', 'bookmarks', 'highlights', 'goalType', 'minutes', 'planDays', 'finishedAt', 'pageLook', 'scrollMode', 'vSnap', 'readerZoom'];
 const pickBook = (ctx) => BOOK_FIELDS.reduce((o, k) => (ctx[k] !== undefined ? { ...o, [k]: ctx[k] } : o), {});
 const clearBook = (ctx) => { const c = { ...ctx }; BOOK_FIELDS.forEach(k => delete c[k]); return c; };
 
@@ -88,6 +114,42 @@ async function outlinePages(doc) {
   } catch (e) { return []; }
 }
 
+// No outline? Look for "Chapter 3" / "Part II" headings at the top of pages (done once per book, cached).
+const CH_RE = /^\s*(chapter|part|book|section)\s+([0-9]{1,3}|[ivxlcdm]{1,7}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b[\s.:–—-]*(.{0,60})/i;
+async function detectChapters(doc, onProgress) {
+  const out = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    try {
+      const tc = await (await doc.getPage(p)).getTextContent();
+      // the heading line: the first text items that sit on the same line as the first one
+      const items = tc.items.filter(i => i.str && i.str.trim());
+      const y0 = items.length ? items[0].transform[5] : 0;
+      const line = items.slice(0, 12).filter(i => Math.abs(i.transform[5] - y0) < 2);
+      const head = line.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+      const m = head.match(CH_RE);
+      if (m) {
+        const label = `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()} ${m[2]}`;
+        const rest = m[3].trim().replace(/\s+\d+$/, '').slice(0, 48);
+        if (!out.length || out[out.length - 1].title.split(':')[0] !== label) out.push({ title: rest && !/^\d/.test(rest) ? `${label}: ${rest}` : label, page: p });
+      }
+    } catch (e) {}
+    if (onProgress && p % 20 === 0) onProgress(p / doc.numPages);
+    if (p % 10 === 0) await new Promise(r => setTimeout(r, 0)); // stay responsive
+  }
+  return out;
+}
+// Days of a chapter-based plan: k chapters a day, each day starting on a chapter's first page.
+// Pages before the first chapter (preface, contents) go with day 1. Returns reading-page counts per day.
+function chapterCounts(list, chs, k) {
+  if (!list.length || !chs || chs.length < 2) return null;
+  const starts = [...new Set(chs.map(c => c.page))].sort((a, b) => a - b).filter(p => p >= list[0] && p <= list[list.length - 1]);
+  const cuts = [0];
+  for (let j = k; j < starts.length; j += k) { const i = readIdx(list, starts[j]); if (i > cuts[cuts.length - 1] && i < list.length) cuts.push(i); }
+  cuts.push(list.length);
+  const counts = []; for (let i = 0; i < cuts.length - 1; i++) counts.push(cuts[i + 1] - cuts[i]);
+  return counts.filter(c => c > 0);
+}
+
 // One open document, cached in memory
 const PdfStore = {
   doc: null, id: null, chapters: [],
@@ -100,7 +162,7 @@ const PdfStore = {
     this._opening = (async () => {
       const lib = await loadPdfJs();
       const src = await Platform.pdfSource(id);
-      const doc = await lib.getDocument({ ...src, isEvalSupported: false, cMapUrl: 'vendor/cmaps/', cMapPacked: true, standardFontDataUrl: 'vendor/standard_fonts/', useSystemFonts: false }).promise;
+      const doc = await lib.getDocument({ ...src, ...PDF_OPTS }).promise;
       if (this._openingId !== id) return doc;
       if (this.doc && this.doc !== doc) this.doc.destroy().catch(() => {});
       this.doc = doc; this.id = id; this.chapters = [];
@@ -115,7 +177,14 @@ const PdfStore = {
         const good = t && t.length > 1 && !/^(untitled|microsoft word|document|\d+)$/i.test(t) && !/\.(docx?|pdf|indd|tex)$/i.test(t);
         Lib.upsert({ id, metaChecked: true, ...(good ? { title: t, metaTitle: true } : {}), ...(a ? { author: a } : {}), ...(!e.pages ? { pages: doc.numPages } : {}) });
       }
-      outlinePages(doc).then(ch => { if (this.doc === doc) { this.chapters = ch; this.subs.forEach(fn => fn(doc)); } });
+      outlinePages(doc).then(async ch => {
+        if (ch.length < 2) {
+          const ent = Lib.get(id);
+          if (ent && Array.isArray(ent.chapters)) ch = ent.chapters;
+          else { ch = await detectChapters(doc); Lib.upsert({ id, chapters: ch }); }
+        }
+        if (this.doc === doc) { this.chapters = ch; this.subs.forEach(fn => fn(doc)); }
+      });
       return doc;
     })().finally(() => { this._opening = null; });
     return this._opening;
@@ -201,19 +270,43 @@ function readInRange(ctx, from, to) { const s = readSet(ctx); let k = 0; for (co
 const dayISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const shiftDay = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 function doneSet(ctx) { return new Set(ctx.doneDates || []); }
+// A book's plan is live once Summary → Start has been tapped
+const hasPlan = (s) => !!(s && s.days && !s.planDraft);
+// Has this book's own daily reading been finished today? (Each book has its own day; the streak is shared.)
+function bookDoneToday(s) {
+  const t = dayISO(TODAY);
+  return (s.bookDates || []).includes(t) || Object.values(s.dayDates || {}).includes(t);
+}
+// Books read on a given day (for covers on the streak strip)
+const booksOn = (ctx, iso) => (ctx.doneBooks && ctx.doneBooks[iso]) || [];
 function streakCount(set) {
   let d = set.has(dayISO(TODAY)) ? TODAY : shiftDay(TODAY, -1), n = 0;
   while (set.has(dayISO(d))) { n++; d = shiftDay(d, -1); }
   return n;
 }
-// Finish the current plan day: it counts toward the streak, and the plan moves to the next day.
-function markTodayDone(ctx) {
-  const set = doneSet(ctx); set.add(dayISO(TODAY));
-  const i = ctx.doneDays ?? 0;
-  if (ctx.days && i >= ctx.days) return { doneDates: [...set] };
-  return { doneDates: [...set], doneDays: i + 1, dayDates: { ...(ctx.dayDates || {}), [i]: dayISO(TODAY) } };
+// Count a day toward the shared streak, remembering which book was read.
+function streakPatch(ctx, bookId) {
+  const today = dayISO(TODAY);
+  const set = doneSet(ctx); set.add(today);
+  const db = { ...(ctx.doneBooks || {}) };
+  const ids = new Set(db[today] || []); if (bookId) ids.add(bookId);
+  db[today] = [...ids];
+  return { doneDates: [...set], doneBooks: db };
 }
-const todayIsDone = (ctx) => doneSet(ctx).has(dayISO(TODAY));
+// Finish this book's plan day: it counts toward the streak, every page of the day is ticked as read,
+// and the plan moves to the next day.
+function markTodayDone(ctx) {
+  const today = dayISO(TODAY);
+  const bd = new Set(ctx.bookDates || []); bd.add(today);
+  const out = { ...streakPatch(ctx, ctx.bookId), bookDates: [...bd] };
+  const i = ctx.doneDays ?? 0;
+  if (!ctx.days || i >= ctx.days) return out;
+  const d = planSchedule(ctx)[i];
+  const rs = readSet(ctx);
+  if (d) readingList(ctx).forEach(p => { if (p >= d.from && p <= d.to) rs.add(p); });
+  return { ...out, doneDays: i + 1, dayDates: { ...(ctx.dayDates || {}), [i]: today }, readPages: [...rs].sort((a, b) => a - b) };
+}
+const todayIsDone = (ctx) => bookDoneToday(ctx);
 
 // ── Streak strip ──────────────────────────────────────────────
 function StreakWeek({ ctx, compact, style = {} }) {
@@ -235,19 +328,33 @@ function StreakWeek({ ctx, compact, style = {} }) {
         {days.map((d, i) => {
           const done = set.has(dayISO(d));
           const isToday = i === 6;
+          const read = done ? booksOn(ctx, dayISO(d)).map(id => Lib.get(id)).filter(Boolean) : [];
           return (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              <div style={{ position: 'relative', width: 36, height: 36, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: done ? 'var(--sage)' : 'var(--fill)', color: '#fff',
                 border: isToday && !done ? '1.5px dashed var(--ink-3)' : '1.5px solid transparent',
                 animation: isToday && done ? 'pop .4s cubic-bezier(.2,1.4,.4,1)' : 'none' }}>
-                {done && <Icon name="check" size={17} stroke={2.6} />}
+                {done && read.length === 0 && <Icon name="check" size={17} stroke={2.6} />}
+                {read.length > 0 && <MiniCover entry={read[0]} size={36} ring="var(--sage)" style={{ position: 'absolute', inset: -1.5 }} />}
+                {read.length > 1 && <MiniCover entry={read[1]} size={20} ring="var(--cream)" style={{ position: 'absolute', right: -6, bottom: -4 }} />}
+                {read.length > 2 && <span style={{ position: 'absolute', left: -6, bottom: -4, height: 16, minWidth: 16, padding: '0 3px', boxSizing: 'border-box', borderRadius: 999, background: 'var(--ink)', color: 'var(--cream)', border: '1.5px solid var(--cream)', fontFamily: 'var(--font-ui)', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+{read.length - 2}</span>}
               </div>
               <span style={{ fontFamily: 'var(--font-ui)', fontSize: 11.5, fontWeight: isToday ? 600 : 400, color: isToday ? 'var(--ink)' : 'var(--ink-3)' }}>{L[d.getDay()]}</span>
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Round book thumbnail (streak days)
+function MiniCover({ entry, size = 28, ring = 'var(--cream)', style = {} }) {
+  const b = entryBook(entry);
+  return (
+    <div style={{ width: size, height: size, borderRadius: 999, overflow: 'hidden', boxShadow: `0 0 0 1.5px ${ring}`, background: '#fff', flexShrink: 0, ...style }}>
+      <BookCover book={b} w={size} radius={0} style={{ width: size, height: size * 1.5, marginTop: -size * 0.1 }} />
     </div>
   );
 }
@@ -272,7 +379,7 @@ function PdfPage({ doc, n, width, onSize, textLayer, onText }) {
       if (cancelled) return;
       const base = page.getViewport({ scale: 1 });
       const scale = width / base.width;
-      let px = scale * Math.min(3, window.devicePixelRatio || 1);
+      let px = scale * Math.min(thumb ? 2 : 2.5, window.devicePixelRatio || 1);
       const area = base.width * base.height * px * px;
       if (area > MAX_CANVAS_PX) px *= Math.sqrt(MAX_CANVAS_PX / area);
       const vp = page.getViewport({ scale: px });
@@ -459,4 +566,4 @@ function PdfCover({ w, radius = 8, style = {} }) {
 }
 
 Lib.heal();
-Object.assign(window, { planSchedule, readSet, readInRange, todayIsDone, dedupeLibrary, Lib, BOOK_FIELDS, pickBook, clearBook, PAGES_PER_HOUR, SamplePage, SAMPLE_PARA, SAMPLE_CH, PdfCover, PagePicker, parseRanges, compactRanges, readingList, readIdx, ProgressCard, currentBook, bookPage, PdfStore, loadPdfJs, planOf, doneSet, streakCount, markTodayDone, dayISO, StreakWeek, PdfPage });
+Object.assign(window, { PDF_OPTS, detectChapters, chapterCounts, hasPlan, bookDoneToday, booksOn, streakPatch, MiniCover, normTitle, applyImported, planSchedule, readSet, readInRange, todayIsDone, dedupeLibrary, Lib, BOOK_FIELDS, pickBook, clearBook, PAGES_PER_HOUR, SamplePage, SAMPLE_PARA, SAMPLE_CH, PdfCover, PagePicker, parseRanges, compactRanges, readingList, readIdx, ProgressCard, currentBook, bookPage, PdfStore, loadPdfJs, planOf, doneSet, streakCount, markTodayDone, dayISO, StreakWeek, PdfPage });

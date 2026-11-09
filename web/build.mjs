@@ -14,7 +14,7 @@ const dev = process.argv.includes('--dev');
 // Load order matters: the files share globals (the prototype's script-tag model).
 const ORDER = [
   'platform', 'theme', 'logo', 'library-data', 'screens1', 'screens2', 'screens3', 'screens4', 'screens5',
-  'reader', 'reader-view', 'stats', 'streak', 'onboarding', 'shell', 'app',
+  'reader', 'reader-view', 'notes', 'stats', 'streak', 'onboarding', 'shell', 'app',
 ];
 
 rmSync(out, { recursive: true, force: true });

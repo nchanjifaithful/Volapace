@@ -2,4 +2,5 @@
     <string name="app_name">Volapace</string>
     <string name="channel_reminders">Reading reminders</string>
     <string name="channel_reminders_desc">Your daily nudge and streak rescue</string>
+    <string name="widget_desc">Your reading streak and this week at a glance</string>
 </resources>

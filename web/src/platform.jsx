@@ -63,7 +63,7 @@ const Platform = (() => {
           const file = input.files[0]; if (!file) return res(null);
           const buf = await file.arrayBuffer(); const id = await hashBuf(buf);
           let pages = 0, cover = null;
-          try { const lib = await loadPdfJs(); const doc = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise; pages = doc.numPages; cover = await coverDataURL(doc); } catch (e) { return res({ error: 'unreadable' }); }
+          try { const lib = await loadPdfJs(); const doc = await lib.getDocument({ data: new Uint8Array(buf.slice(0)), ...PDF_OPTS }).promise; pages = doc.numPages; cover = await coverDataURL(doc); } catch (e) { return res({ error: 'unreadable' }); }
           const rec = { id, name: file.name, buf, pages, cover, title: file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' '), added: Date.now() };
           await tx('readwrite', s => s.put(rec, id));
           subs.library.forEach(fn => fn());
@@ -86,6 +86,17 @@ const Platform = (() => {
       download(name, b64ToBlob(b64, mime)); return Promise.resolve(true);
     },
     setReminder(cfg) { if (N) N.setReminder(JSON.stringify(cfg)); },
+    // Home-screen streak widget: the days the goal was met (the widget works out the streak itself)
+    setWidget(data) { if (N && N.setWidget) N.setWidget(JSON.stringify(data)); },
+    // Pick a CSV / JSON export to import. Resolves with { name, text } or null.
+    pickText() {
+      if (N && N.pickText) return call((id) => N.pickText(id));
+      return new Promise((res) => {
+        const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,.json,text/csv,application/json,text/plain';
+        input.onchange = async () => { const f = input.files[0]; if (!f) return res(null); res({ name: f.name, text: await f.text() }); };
+        input.click();
+      });
+    },
     notificationsAllowed() { return N ? N.notificationsAllowed() : true; },
     setTheme(dark, bg) { if (N) N.setTheme(!!dark, bg || (dark ? '#000000' : '#FFFFFF')); },
     vibrate(pattern) { if (N) N.vibrate(pattern.join(',')); else if (navigator.vibrate) navigator.vibrate(pattern); },

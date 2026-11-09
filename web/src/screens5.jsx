@@ -59,12 +59,7 @@ function LibraryScreen({ go, ctx = {}, openBook, forget, openModal, closeModal }
   const shown = ALL.filter(b => (filter === 'all' || b.status === filter) && (!needle || b.title.toLowerCase().includes(needle) || (b.author || '').toLowerCase().includes(needle)));
   const finished = ALL.filter(b => b.status === 'completed').length;
   const open = (b) => openBook(b.entry);
-  const remove = async (b) => {
-    const ok = await Platform.confirm(`Remove “${b.title}”?`, b.paper ? 'Its plan and progress are removed from Volapace.' : 'The PDF is deleted from the Volapace folder on this phone, along with its plan and progress.', 'Remove');
-    if (!ok) return;
-    await Lib.remove(b.id);
-    if (b.id === ctx.bookId) forget && forget();
-  };
+  const remove = (b) => openModal(<RemoveBookSheet entry={b.entry} close={closeModal} onRemoved={() => { closeModal(); if (b.id === ctx.bookId) forget && forget(); }} />);
   const label = LIB_FILTERS.find(f => f[0] === filter)[1];
 
   // grid geometry: 3 columns inside 22px gutters, 12px gaps; title area fixed at two lines
@@ -298,7 +293,7 @@ function YouScreen({ theme, setTheme, openModal, closeModal, account, setAccount
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: 20, color: name ? 'var(--ink)' : 'var(--ink-3)', letterSpacing: -0.3 }}>{name || 'Your name'}</div>
-          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)', marginTop: 2 }}>{account.since ? `Reading since ${sinceLabel(account.since)}` : account.email || 'Stored only on this phone'}</div>
+          <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)', marginTop: 2 }}>{[(typeof READER_TYPES !== 'undefined' && (READER_TYPES.find(t => t.k === account.readerType) || {}).label) || '', account.since ? `Reading since ${sinceLabel(account.since)}` : account.email || 'Stored only on this phone'].filter(Boolean).join(' · ')}</div>
         </div>
         <button onClick={() => editAccount()} style={{ height: 34, padding: '0 14px', borderRadius: 999, border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--ink)', fontFamily: 'var(--font-ui)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>Edit</button>
       </div>
@@ -337,8 +332,8 @@ function YouScreen({ theme, setTheme, openModal, closeModal, account, setAccount
         </div>
         <PrefRow icon="bell" title="Reminders & rest days" sub={reminderSub} onClick={() => go('reminders')} />
         <PrefRow icon="target" title="Yearly goal" sub={`${life.goal} books in ${TODAY.getFullYear()}`} onClick={() => openModal(<YearGoalSheet close={closeModal} value={life.goal} done={life.books} onSave={v => update({ yearGoal: v })} />)} />
-        <PrefRow icon="user" title="Account" sub={account.email || 'Name, photo and email, kept on this phone'} onClick={() => editAccount()} />
-        <PrefRow icon="upload" title="Export data" sub="Save your reading history as a file" onClick={() => openModal(<ExportSheet close={closeModal} ctx={ctx} account={account} />)} last />
+        <PrefRow icon="upload" title="Export data" sub="Save your reading history as a file" onClick={() => openModal(<ExportSheet close={closeModal} ctx={ctx} account={account} />)} />
+        <PrefRow icon="download" title="Import data" sub="From a Volapace CSV or JSON export" onClick={() => openModal(<ImportSheet close={closeModal} ctx={ctx} update={update} account={account} setAccount={setAccount} />)} last />
       </div>
 
       <SectionHead title="Storage" />
@@ -528,7 +523,9 @@ function buildExport(ctx, account, inc) {
   if (inc.books) data.books = books.map(({ e, b, s }) => ({
     title: b.title, author: b.author, type: e.paper ? 'paper' : 'pdf', file: e.file || '', status: STATUS_META[b.status].label.toLowerCase(),
     pages: b.pages, currentPage: s.page || 1, percent: b.planPct, planDays: s.days || '', daysDone: s.doneDays || 0, pagesPerDay: s.ppd || '', skippedPages: s.skip || [],
+    readPages: compactRanges(s.readPages || []).join(' '), finishedDate: (s.finishedAt || e.finishedAt) ? dayISO(new Date(s.finishedAt || e.finishedAt)) : '',
   }));
+
   if (inc.books) data.history = Object.keys(ctx.log || {}).sort().map(d => ({ date: d, minutes: Math.round((ctx.log[d].s || 0) / 60), pages: ctx.log[d].p || 0, sessions: ctx.log[d].n || 0 }));
   if (inc.streak) { const set = doneSet(ctx); data.streak = { current: streakCount(set), longest: longestStreak(set), goalDays: [...set].sort() }; }
   if (inc.bookmarks) data.bookmarks = books.flatMap(({ b, s }) => (s.bookmarks || []).map(p => ({ book: b.title, page: p })));
@@ -646,3 +643,133 @@ function AllBookmarksSheet({ ctx, close, onOpen }) {
   );
 }
 Object.assign(window, { AllBookmarksSheet });
+
+// ── Import: read back a Volapace export (CSV or JSON) ──
+// Reading history, streak days and finished books are restored even if none of the books are on this
+// phone. Progress, bookmarks and notes go to matching books (by title); books that aren't here yet
+// keep their progress waiting until the PDF is added (see applyImported in reader.jsx).
+function parseCSV(text) {
+  const sections = {}; let name = null, cols = null;
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i <= text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else if (c !== undefined) cell += c; continue; }
+    if (c === '"') { q = true; continue; }
+    if (c === ',') { row.push(cell); cell = ''; continue; }
+    if (c === '\n' || c === '\r' || c === undefined) { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; continue; }
+    cell += c;
+  }
+  for (const r of rows) {
+    if (r.length === 1 && !r[0].trim()) { cols = null; continue; }
+    if (r.length === 1 && r[0].startsWith('#')) { name = r[0].replace(/^#\s*/, '').trim(); sections[name] = []; cols = null; continue; }
+    if (!name) continue;
+    if (!cols) { cols = r.map(x => x.trim()); continue; }
+    const o = {}; cols.forEach((k, j) => { o[k] = r[j] != null ? r[j] : ''; }); sections[name].push(o);
+  }
+  return {
+    account: sections.account && sections.account[0],
+    books: sections.books,
+    history: sections.reading_days,
+    streak: sections.goal_days ? { goalDays: sections.goal_days.map(r => r.date) } : null,
+    bookmarks: sections.bookmarks,
+    highlights: sections.highlights,
+  };
+}
+const numList = (v) => Array.isArray(v) ? v.map(Number).filter(Boolean) : String(v || '').split(/[\s,]+/).flatMap(t => { const m = t.match(/^(\d+)(?:[-–](\d+))?$/); if (!m) return []; const a = +m[1], b = m[2] ? +m[2] : a; const o = []; for (let p = a; p <= b && o.length < 5000; p++) o.push(p); return o; });
+
+function importData(data, ctx, update, account, setAccount) {
+  const today = dayISO(TODAY);
+  const out = { days: 0, streak: 0, books: 0, waiting: 0, marks: 0, notes: 0 };
+  const patch = {};
+  // reading history
+  if (Array.isArray(data.history)) {
+    const log = { ...(ctx.log || {}) };
+    data.history.forEach(h => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(h.date || '')) return;
+      const x = { s: 0, p: 0, n: 0, b: {}, ...(log[h.date] || {}) };
+      x.s = Math.max(x.s, Math.round(+h.minutes * 60) || 0); x.p = Math.max(x.p, +h.pages || 0); x.n = Math.max(x.n, +h.sessions || 0);
+      log[h.date] = x; out.days++;
+    });
+    patch.log = log;
+  }
+  // streak days
+  const goal = data.streak && (data.streak.goalDays || []);
+  if (goal && goal.length) { const set = doneSet(ctx); goal.forEach(d => { if (/^\d{4}-\d{2}-\d{2}$/.test(d)) { if (!set.has(d)) out.streak++; set.add(d); } }); patch.doneDates = [...set]; }
+  // books
+  const lib = Lib.list();
+  const find = (title) => { const k = normTitle(title); return lib.find(e => normTitle(e.title) === k || normTitle(e.file) === k) || null; };
+  let pend; try { pend = JSON.parse(localStorage.getItem('vp_import')) || {}; } catch { pend = {}; }
+  const snaps = {}; // id or 'pending:title' -> patch
+  const target = (title) => { const e = find(title); const key = e ? e.id : 'p:' + normTitle(title); if (!snaps[key]) snaps[key] = { entry: e, title, s: {} }; return snaps[key]; };
+  const finished = [...(ctx.finished || [])];
+  (data.books || []).forEach(b => {
+    if (!b.title) return;
+    const t = target(b.title), s = t.s;
+    if (+b.pages) s.pages = +b.pages;
+    if (+b.currentPage) s.page = +b.currentPage;
+    if (+b.planDays) { s.days = +b.planDays; s.doneDays = +b.daysDone || 0; s.ppd = +b.pagesPerDay || undefined; s.planVer = 1; s.planDraft = false; }
+    const skip = numList(b.skippedPages); if (skip.length) s.skip = skip;
+    const rp = numList(b.readPages); if (rp.length) s.readPages = rp;
+    if (String(b.status).toLowerCase() === 'finished') {
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(b.finishedDate || '') ? b.finishedDate : today;
+      s.finishedAt = new Date(date + 'T12:00:00').getTime();
+      const id = t.entry ? t.entry.id : 'imported:' + normTitle(b.title);
+      if (!finished.some(f => f.id === id)) finished.push({ id, title: b.title, pages: +b.pages || 0, date });
+    }
+    out.books++;
+  });
+  if (finished.length !== (ctx.finished || []).length) patch.finished = finished;
+  (data.bookmarks || []).forEach(m => { if (!m.book || !+m.page) return; const s = target(m.book).s; s.bookmarks = [...new Set([...(s.bookmarks || []), +m.page])].sort((a, b) => a - b); out.marks++; });
+  (data.highlights || []).forEach((h, i) => { if (!h.book || !+h.page) return; const s = target(h.book).s; s.highlights = [...(s.highlights || []), { id: 'i' + Date.now().toString(36) + i, page: +h.page, text: h.text || '', note: h.note || '', color: HL_KEYS.includes(h.color) ? h.color : h.color === 'red' ? 'pink' : 'yellow', rects: [], at: Date.now() }]; out.notes++; });
+  // write book progress
+  Object.values(snaps).forEach(({ entry, title, s }) => {
+    const merge = (old) => ({ ...old, ...s, bookmarks: [...new Set([...(old.bookmarks || []), ...(s.bookmarks || [])])].sort((a, b) => a - b), highlights: [...(old.highlights || []), ...(s.highlights || []).filter(h => !(old.highlights || []).some(o => o.page === h.page && o.text === h.text && o.note === h.note))], readPages: [...new Set([...(old.readPages || []), ...(s.readPages || [])])].sort((a, b) => a - b) });
+    if (!entry) { pend[normTitle(title)] = merge(pend[normTitle(title)] || {}); out.waiting++; return; }
+    if (entry.id === ctx.bookId) Object.assign(patch, merge(pickBook(ctx)));
+    else Lib.upsert({ id: entry.id, snap: merge(entry.snap || {}), ...(s.finishedAt ? { finishedAt: s.finishedAt } : {}) });
+  });
+  try { localStorage.setItem('vp_import', JSON.stringify(pend)); } catch (e) {}
+  if (data.account && setAccount && (!account.name || !account.email)) setAccount({ ...account, ...(account.name ? {} : { name: data.account.name || '' }), ...(account.email ? {} : { email: data.account.email || '' }) });
+  if (Object.keys(patch).length) update(patch);
+  return out;
+}
+
+function ImportSheet({ close, ctx, update, account, setAccount }) {
+  const [state, setState] = React.useState(null); // null | 'busy' | { error } | result
+  const pick = async () => {
+    setState('busy');
+    const f = await Platform.pickText();
+    if (!f) { setState(null); return; }
+    if (f.error) { setState({ error: 'Couldn’t read that file.' }); return; }
+    try {
+      const txt = f.text.replace(/^﻿/, '');
+      const data = /^\s*\{/.test(txt) ? JSON.parse(txt) : parseCSV(txt);
+      const r = importData(data, ctx, update, account, setAccount);
+      if (!r.days && !r.streak && !r.books && !r.marks && !r.notes) { setState({ error: 'Nothing to import in that file. Pick a Volapace export.' }); return; }
+      setState(r);
+    } catch (e) { setState({ error: 'That doesn’t look like a Volapace export.' }); }
+  };
+  const r = state && typeof state === 'object' && !state.error ? state : null;
+  const line = (n, l) => n ? <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-ui)', fontSize: 14.5 }}><span style={{ color: 'var(--ink-2)' }}>{l}</span><b style={{ fontWeight: 600, color: 'var(--ink)' }}>{n}</b></div> : null;
+  return (
+    <BottomSheet>
+      <SheetHeader icon="download" title="Import data" sub="From a Volapace CSV or JSON export" />
+      {!r ? <>
+        <div style={{ padding: 14, borderRadius: 16, background: 'var(--fill)', fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.45, marginBottom: 14 }}>
+          Your reading history, streak and finished books come back even if the PDFs aren&rsquo;t on this phone. Progress, bookmarks and notes join their books by title &mdash; books that aren&rsquo;t here yet pick them up when you add the PDF.
+        </div>
+        {state && state.error && <div style={{ fontFamily: 'var(--font-ui)', fontSize: 13.5, color: 'var(--sage)', margin: '0 4px 12px' }}>{state.error}</div>}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Button variant="soft" style={{ flex: 1 }} onClick={close}>Cancel</Button>
+          <Button icon="download" style={{ flex: 2 }} disabled={state === 'busy'} onClick={pick}>{state === 'busy' ? 'Reading…' : 'Choose a file'}</Button>
+        </div>
+      </> : <>
+        <div style={{ borderRadius: 16, border: '1px solid var(--line)', overflow: 'hidden', marginBottom: 14 }}>
+          {line(r.days, 'Reading days')}{line(r.streak, 'New streak days')}{line(r.books, 'Books')}{line(r.waiting, 'Waiting for their PDF')}{line(r.marks, 'Bookmarks')}{line(r.notes, 'Highlights & notes')}
+        </div>
+        <Button full icon="check" onClick={close}>Done</Button>
+      </>}
+    </BottomSheet>
+  );
+}
+Object.assign(window, { ImportSheet, parseCSV, importData });

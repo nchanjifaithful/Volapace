@@ -59,6 +59,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- Home-screen streak widget -->
+        <receiver android:name=".StreakWidget" android:exported="false" android:label="Reading streak">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_streak_info" />
+        </receiver>
+
         <!-- Hands the streak card / exports to the share sheet -->
         <provider
             android:name=".ShareProvider"

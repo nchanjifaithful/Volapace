@@ -14,34 +14,43 @@ function applyHistory(prev, data) {
   const next = { ...prev, ...data };
   const today = dayISO(TODAY);
   const log = { ...(prev.log || {}) };
-  const day = { s: 0, p: 0, n: 0, b: {}, ...(log[today] || {}) };
-  day.b = { ...(day.b || {}) };
+  const day = { s: 0, p: 0, n: 0, b: {}, k: {}, bp: {}, ...(log[today] || {}) };
+  day.b = { ...(day.b || {}) }; day.k = { ...(day.k || {}) }; day.bp = { ...(day.bp || {}) };
   const title = next.title || 'Untitled';
+  const bid = next.bookId || 'none';
   let touched = false;
 
-  // reading time from the reader timer (timeLog is today's running total)
+  // reading time from the reader timer (timeLog is today's running total, across books)
   if (data.timeLog && data.timeLog.date === today) {
     const before = prev.timeLog && prev.timeLog.date === today ? prev.timeLog.secs : 0;
     const delta = data.timeLog.secs - before;
-    if (delta > 0) { day.s += delta; day.b[title] = (day.b[title] || 0) + delta; touched = true; }
+    if (delta > 0) { day.s += delta; day.b[title] = (day.b[title] || 0) + delta; day.k[bid] = (day.k[bid] || 0) + delta; touched = true; }
   }
   // a finished reading session (seconds)
   if (data.endSession != null) { if (data.endSession >= 30) { day.n += 1; touched = true; } delete next.endSession; }
-  // pages logged by hand (paper copies) or turned forward in the reader
-  if (data.logPages != null) {
-    if (data.logPages > 0) { day.p += data.logPages; touched = true; }
-    delete next.logPages;
-  } else if (data.page != null && prev.page != null && prev.bookId === next.bookId) {
-    const d = data.page - prev.page;
-    if (d > 0 && d <= 5) { day.p += d; touched = true; }
+  // Pages read: a PDF page counts once, the first time it's ticked as read (double-tap, the dot, or
+  // finishing the day). Paper books count the pages logged by hand.
+  let fresh = 0;
+  if (data.readPages && prev.bookId === next.bookId && next.hasPdf) {
+    // a page counts once ever, even if it's unticked and ticked again
+    const counted = new Set([...(prev.countedPages || []), ...(prev.readPages || [])]);
+    const added = data.readPages.filter(p => !counted.has(p));
+    fresh = added.length;
+    if (fresh) next.countedPages = [...counted, ...added].sort((a, b) => a - b);
   }
+  if (data.logPages != null) { if (!next.hasPdf && data.logPages > 0) fresh += data.logPages; delete next.logPages; }
+  if (fresh > 0) { day.p += fresh; day.bp[bid] = (day.bp[bid] || 0) + fresh; touched = true; }
   if (touched) { log[today] = day; next.log = log; }
 
-  // finishing a book
-  if (next.bookId && next.days && !next.finishedAt) {
+  // reading a book that has no plan still counts toward the streak
+  if (fresh > 0 && next.bookId && !hasPlan(next)) Object.assign(next, streakPatch(next, next.bookId));
+
+  // finishing a book: the plan's last day is done, or every reading page is ticked
+  if (next.bookId && !next.finishedAt && (hasPlan(next) || (next.readPages || []).length)) {
     const list = readingList(next);
     const plan = planOf(next);
-    if ((next.page || 0) >= list[list.length - 1] || plan.finished) {
+    const rs = new Set(next.readPages || []);
+    if ((hasPlan(next) && plan.finished) || (next.hasPdf && list.length > 1 && list.every(p => rs.has(p)))) {
       next.finishedAt = Date.now();
       next.finished = [...(prev.finished || []).filter(f => f.id !== next.bookId), { id: next.bookId, title, pages: plan.reading, date: today }];
     }
@@ -147,4 +156,7 @@ function readingPace(ctx) {
   return { pph: s >= 600 && p > 0 ? Math.round(p / (s / 3600)) : null, session: n ? Math.round(s / n / 60) : null };
 }
 
-Object.assign(window, { weekStart, applyHistory, lifetimeStats, rangeStats, monthsMet, todayMinutes, readingPace, longestStreak, MONTH_ABBR });
+// Seconds spent in one book's reader today (for time-based daily goals)
+const bookSecsToday = (ctx, id) => { const x = logDay(ctx, dayISO(TODAY)); return (x && x.k && x.k[id]) || 0; };
+
+Object.assign(window, { bookSecsToday, logDay, weekStart, applyHistory, lifetimeStats, rangeStats, monthsMet, todayMinutes, readingPace, longestStreak, MONTH_ABBR });

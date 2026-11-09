@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2
+
+- **Every book is its own.** Each book keeps its own plan, today's reading and pages read. Adding a new book no longer takes over the one you're reading, and finishing one book's day doesn't mark the others done. The streak is shared, and the streak strip shows the covers of the books you read each day.
+- **Today** shows a card for every book with a plan, each with its own progress. Once a day is done, the card shows the next day's pages. The header has a welcome with your name.
+- **Read without a plan.** Open any book and read at your own pace; pages you mark as read still count toward your streak. Add a plan whenever you like.
+- **Chapter plans.** Volapace finds a PDF's chapters (from its contents, or "Chapter 1"-style headings) and can plan by chapters a day.
+- **Book page.** Edit plan, Change finish date, Pause reading, Reset and Remove from library are in the ⋮ menu. Bookmarks sit right under today's reading, then a reading outline that shows the next 10 days with a Show more button. Reminders are now set for the whole plan rather than for each day.
+- **Reader.** Double-tap a page to mark it read (a quick tour explains this the first time). A green dot shows read pages. Swipe now follows your finger. Zoom keeps your place instead of jumping. Scrolling is smoother, and the page slider shows the page number as you drag. The controls don't hide when a tap only stops a scroll.
+- **Search** sits at the bottom of the reader and steps through every match one by one; only the current match ripples, and more softly.
+- **Notes.** A new Notes tab gathers every highlight, note and bookmark. Contents has a New note button for notes on a whole page. New highlighter colours: yellow, green, blue and pink.
+- **Clearer text in PDFs from Word.** PDFs that don't embed Times New Roman or Arial were drawn with the phone's own font squeezed into the original spacing, which made them hard to read. They now use the matching fonts that ship inside the app.
+- **Finishing a day** ticks all of its pages as read.
+- **Accurate numbers.** A page counts once, the first time it's marked read, so pages on Progress and the streak card are no longer doubled. Time goals use the time spent in that book.
+- **Import data** from a Volapace CSV or JSON export. Your history and streak come back even without the PDFs; progress waits for each book until you add it.
+- **Onboarding** asks your name and what kind of reader you are, and starts your pace from it.
+- **Streak widget** for the home screen.
+- **One splash screen**, with the Volapace logotype. New dark-mode and books-finished icons. Account was removed from Preferences (edit your details from the top of Profile).
+
 ## 1.1
 
 - **New look.** The official Volapace logo on the app icon, the launch screen and inside the app, with a short intro that explains what Volapace is.
