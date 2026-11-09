@@ -12,14 +12,15 @@ An Android app (Java, no third-party libraries) that hosts the design's React sc
 
 - Repo: https://github.com/nchanjifaithful/Volapace (public). Releases ship the signed APK.
 - Package `app.volapace`, minSdk 26, target/compile 34, Java 17.
-- Original design files (not in the repo): `D:\Projects\Volapace\design\volapace_handoff\prototype\`. The official logo: `D:\Projects\Volapace\Volapace Logo.svg`, with derived copies in `brand/`.
+- The official logo is in `brand/` (flat-colour versions derived from the original SVG).
+- Machine-specific notes (local paths, tool locations, the signing-key backup) are in `CLAUDE.local.md`, which is not committed.
 
-## Machine setup (Windows)
+## Requirements
 
-- **Node.js 26 LTS** is installed system-wide (`C:\Program Files\nodejs`, via `winget install OpenJS.NodeJS.LTS`). If a shell can't find `node`, prepend it: `export PATH="/c/Program Files/nodejs:$PATH"` (Git Bash).
-- **No Android SDK or JDK locally.** APKs are built only by GitHub Actions. Don't try to run Gradle locally.
-- **gh** is logged in as `nchanjifaithful`.
-- The signing key lives in GitHub secrets (`VOLAPACE_KEYSTORE_BASE64`, `VOLAPACE_KEYSTORE_PASSWORD`). The only backup is `~/.volapace-signing` (fingerprint `BA:08:9A:1B…9B:4C`). Never regenerate it: updates only install over builds signed with this key. `setup-signing.sh` refuses to overwrite it.
+- **Node.js 18+** for the UI build.
+- **No Android SDK or JDK needed locally.** APKs are built only by GitHub Actions. Don't try to run Gradle locally.
+- **gh** (GitHub CLI), logged in to the repo owner's account, for releases and secrets.
+- The signing key lives in GitHub secrets (`VOLAPACE_KEYSTORE_BASE64`, `VOLAPACE_KEYSTORE_PASSWORD`). Never regenerate it: updates only install over builds signed with the same key. `setup-signing.sh` refuses to overwrite an existing key.
 
 ## Build and preview the UI
 
